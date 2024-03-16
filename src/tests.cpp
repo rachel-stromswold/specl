@@ -2,7 +2,6 @@
 #include <doctest.h>
 
 extern "C" {
-#include "utils.h"
 #include "read.h"
 }
 
@@ -162,7 +161,7 @@ TEST_CASE("function parsing") {
     CHECK(er.val.e->c == E_BAD_SYNTAX);
     cleanup_val(&er);
     cleanup_func(&cur_func);
-    cleanup_context(sc);
+    destroy_context(sc);
 }
 
 TEST_CASE("string handling") {
@@ -172,7 +171,7 @@ TEST_CASE("string handling") {
     size_t len;
     //check that trimming an empty string works
     buf[0] = 0;
-    char* str = CGS_trim_whitespace(buf, &len);
+    char* str = trim_whitespace(buf, &len);
     REQUIRE(str == buf);
     CHECK(len == 0);
     CHECK(str[0] == 0);
@@ -199,7 +198,7 @@ TEST_CASE("string handling") {
 	CHECK(tmp_val.n_els == i);
 	cleanup_val(&tmp_val);
     }
-    cleanup_context(sc);
+    destroy_context(sc);
 }
 
 TEST_CASE("operations") {
@@ -355,7 +354,7 @@ TEST_CASE("operations") {
 	CHECK(strcmp(tmp_val.val.e->msg, "unexpected \"") == 0);
 	cleanup_val(&tmp_val);
     }
-    cleanup_context(sc);
+    destroy_context(sc);
 }
 
 TEST_CASE("builtin functions") {
@@ -571,7 +570,7 @@ TEST_CASE("builtin functions") {
 	CHECK(tmp_val.val.e->c == E_BAD_TYPE);
 	cleanup_val(&tmp_val);
     }
-    cleanup_context(sc);
+    destroy_context(sc);
 }
 
 TEST_CASE("value parsing") {
@@ -787,7 +786,7 @@ TEST_CASE("value parsing") {
 	}
 	cleanup_val(&tmp_val);
     }
-    cleanup_context(sc);
+    destroy_context(sc);
 }
 
 TEST_CASE("line_buffer splitting") {
@@ -1062,7 +1061,7 @@ TEST_CASE("context lookups") {
 	    }
 	}
     }
-    cleanup_context(c);
+    destroy_context(c);
 }
 
 TEST_CASE("context parsing") {
@@ -1083,7 +1082,7 @@ TEST_CASE("context parsing") {
 	CHECK(val_c.val.l[0].type == VAL_STR);
 	CHECK(val_c.val.l[1].type == VAL_STR);
 	destroy_line_buffer(b_1);
-	cleanup_context(c);
+	destroy_context(c);
     }
     SUBCASE ("with nesting") {
 	const char* lines[] = { "a = {name = \"apple\", values = [20, 11]}", "b = a.values[0]", "c = a.values[1] + a.values[0]+1" }; 
@@ -1111,7 +1110,7 @@ TEST_CASE("context parsing") {
 	value val_c = lookup(c, "c");
 	CHECK(val_c.type == VAL_NUM);
 	CHECK(val_c.val.x == 32);
-	cleanup_context(c);
+	destroy_context(c);
 	destroy_line_buffer(b_1);
     }
     SUBCASE ("user defined functions") {
@@ -1140,7 +1139,7 @@ TEST_CASE("context parsing") {
 	CHECK(val_b_name.type == VAL_STR);
 	CHECK(strcmp(val_b_name.val.s, "hi") == 0);
 	free(tmp_name);
-	cleanup_context(c);
+	destroy_context(c);
 	destroy_line_buffer(b_1);
     }
     SUBCASE ("stress test") {
@@ -1161,7 +1160,7 @@ TEST_CASE("context parsing") {
 	cleanup_val(&tmp_f);
 	er = read_from_lines(c, b_2);
 	CHECK(er.type != VAL_ERR);
-	cleanup_context(c);
+	destroy_context(c);
 	destroy_line_buffer(b_1);
 	destroy_line_buffer(b_2);
     }
@@ -1259,5 +1258,5 @@ TEST_CASE("file parsing") {
     strncpy(buf, "gs.region.pt_2 == vec(.4, 0.4, .2)", BUF_SIZE);
     CHECK(cgs_true(parse_value(c, buf)));
     destroy_line_buffer(lb);
-    cleanup_context(c);
+    destroy_context(c);
 }

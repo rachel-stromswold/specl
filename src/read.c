@@ -158,7 +158,7 @@ int write_numeric(char* str, size_t n, double x) {
     return snprintf(str, n, "%f", x);
 }
 
-char* CGS_trim_whitespace(char* str, size_t* len) {
+char* trim_whitespace(char* str, size_t* len) {
     if (!str) return NULL;
     size_t start_ind = 0;
     int started = 0;
@@ -1153,7 +1153,14 @@ value make_val_str(const char* s) {
     for (size_t i = 0; i < v.n_els; ++i) v.val.s[i] = s[i];
     return v;
 }
-
+value make_val_array(double* vs, size_t n) {
+    value v;
+    v.type = VAL_ARRAY;
+    v.n_els = n;
+    v.val.a = (double*)malloc(sizeof(double)*v.n_els);
+    memcpy(v.val.a, vs, sizeof(double)*n);
+    return v;
+}
 value make_val_list(const value* vs, size_t n_vs) {
     value v;
     v.type = VAL_LIST;
@@ -1419,9 +1426,9 @@ void cleanup_val(value* v) {
     } else if (v->type == VAL_ARRAY && v->val.a) {
 	free(v->val.a);
     } else if (v->type == VAL_INST && v->val.c) {
-	cleanup_context(v->val.c);
+	destroy_context(v->val.c);
     } else if (v->type == VAL_FUNC && v->val.f) {
-	cleanup_user_func(v->val.f);
+	destroy_user_func(v->val.f);
     }
     v->type = VAL_UNDEF;
     v->val.x = 0;
@@ -1757,18 +1764,6 @@ void swap_func(cgs_func* a, cgs_func* b) {
     }
 }
 
-value lookup_named(cgs_func f, const char* name) {
-    for (size_t i = 0; i < f.n_args; ++i) {
-	if (f.args[i].name && strcmp(f.args[i].name, name) == 0)
-	    return f.args[i].val;
-    }
-    value ret;
-    ret.type = VAL_UNDEF;
-    ret.val.x = 0;
-    ret.n_els = 0;
-    return ret;
-}
-
 /** ======================================================== name_val_pair ======================================================== **/
 
 name_val_pair make_name_val_pair(const char* p_name, value p_val) {
@@ -1903,7 +1898,7 @@ struct context* copy_context(const context* o) {
     return c;
 }
 
-void cleanup_context(struct context* c) {
+void destroy_context(struct context* c) {
     //erase the hash table
     for (size_t i = con_it_next(c, 0); i < con_size(c); i = con_it_next(c,i+1))
 	cleanup_name_val_pair(c->table[i]);
@@ -2046,6 +2041,65 @@ value lookup(const struct context* c, const char* str) {
     return ret;
 }
 
+int lookup_c_array(const context* c, const char* str, double* sto, size_t n) {
+    if (n == 0)
+	return 0;
+    value tmp = lookup(c, str);
+    if (!tmp.type)
+	return -1;
+    //bounds check
+    size_t n_write = (tmp.n_els > n) ? n : tmp.n_els;
+    if (tmp.type == VAL_ARRAY) {
+	memcpy(sto, tmp.val.a, sizeof(double)*n_write);
+	return (int)n_write;
+    } else if (tmp.type == VAL_LIST) {
+	for (size_t i = 0; i < n_write; ++i) {
+	    if (tmp.val.l[i].type != VAL_NUM)
+		return -3;
+	    sto[i] = tmp.val.l[i].val.x;
+	}
+	return (int)n_write;
+    }
+    return -2;
+}
+
+int lookup_c_str(const context* c, const char* str, char* sto, size_t n) {
+    if (n == 0)
+	return 0;
+    value tmp = lookup(c, str);
+    if (tmp.type != VAL_STR)
+	return -1;
+    //bounds check
+    size_t n_write = (tmp.n_els > n) ? n : tmp.n_els;
+    memcpy(sto, tmp.val.s, sizeof(char)*n_write);
+    return 0;
+}
+
+int lookup_int(const context* c, const char* str, int* er) {
+    if (er) *er = 0;
+    value tmp = lookup(c, str);
+    if (tmp.type == VAL_NUM)
+	return (int)tmp.val.x;
+    if (er) *er = 1;
+    return 0;
+}
+size_t lookup_uint(const context* c, const char* str, int* er) {
+    if (er) *er = 0;
+    value tmp = lookup(c, str);
+    if (tmp.type == VAL_NUM)
+	return (size_t)tmp.val.x;
+    if (er) *er = 1;
+    return 0;
+}
+double lookup_float(const context* c, const char* str, int* er) {
+    if (er) *er = 0;
+    value tmp = lookup(c, str);
+    if (tmp.type == VAL_NUM)
+	return tmp.val.x;
+    if (er) *er = 1;
+    return 0;
+}
+
 void set_value(struct context* c, const char* p_name, value p_val, int copy) {
     //generate a fake name if none was provided
     if (!p_name || p_name[0] == 0) {
@@ -2093,9 +2147,9 @@ static inline struct for_state make_for_state(context* c, const char* start, cha
     fs.expr_len = for_start-(start+1);
     //the variable name is whatever is in between the "for" and the "in"
     fs.in_start[0] = 0;
-    fs.var_name = CGS_trim_whitespace(for_start+KEY_FOR_LEN, &n);
+    fs.var_name = trim_whitespace(for_start+KEY_FOR_LEN, &n);
     fs.var_name = strndup(fs.var_name, n+1);
-    for_start[KEY_FOR_LEN+1+n] = ' ';//reset the for string from CGS_trim_whitespace
+    for_start[KEY_FOR_LEN+1+n] = ' ';//reset the for string from trim_whitespace
     //now parse the list we iterate over
     char* list_expr = strdup(fs.in_start+KEY_IN_LEN);
     fs.it_list = parse_value(c, list_expr);
@@ -2224,7 +2278,7 @@ cgs_func parse_func(struct context* c, char* token, long open_par_ind, value* v_
 
     //break the string up at the parenthesis and remove surrounding whitespace
     token[open_par_ind] = 0;
-    f.name = CGS_trim_whitespace(token, NULL);
+    f.name = trim_whitespace(token, NULL);
 
     //now remove whitespace from the ends of the string
     char* arg_str = token+open_par_ind+1;
@@ -2454,7 +2508,7 @@ static inline value parse_literal_table(struct context* c, char* str, int first_
 	char* eq_loc = strchr_block(list_els[j], '=');
 	if (eq_loc) {
 	    *eq_loc = 0;
-	    cur_name = CGS_trim_whitespace(list_els[j], NULL);
+	    cur_name = trim_whitespace(list_els[j], NULL);
 	    rval = eq_loc+1;
 	}
 	value tmp = parse_value(sto.val.c, rval);
@@ -2524,7 +2578,7 @@ static inline value parse_literal_func(struct context* c, char* str, int first_o
     //otherwise interpret this as a parenthetical expression
     str[last_close_ind] = 0;
     size_t reset_ind;
-    char* tmp_str = CGS_trim_whitespace(str+first_open_ind+1, &reset_ind);
+    char* tmp_str = trim_whitespace(str+first_open_ind+1, &reset_ind);
     sto = parse_value(c, tmp_str);
     tmp_str[reset_ind] = ' ';
     str[first_open_ind] = '(';
@@ -2552,7 +2606,7 @@ value parse_value(struct context* c, char* str) {
 	size_t reset_ind = 0;
 	//if there isn't a valid parenthetical expression, then we should interpret this as a variable
 	if (first_open_ind < 0 || last_close_ind < 0) {
-	    str = CGS_trim_whitespace(str, &reset_ind);
+	    str = trim_whitespace(str, &reset_ind);
 	    sto = lookup(c, str);
 	    //ensure that empty strings return undefined
 	    if (str[0] == 0)
@@ -2649,7 +2703,7 @@ static inline value read_single_line(context* c, read_state* rs) {
 	    //handle assignments
 	    if (lb_get(rs->b, rs->pos) == '=') {
 		rs->buf[k++] = 0;
-		lval = CGS_trim_whitespace(rs->buf, NULL);
+		lval = trim_whitespace(rs->buf, NULL);
 		init.off = k;
 		//buf_off = k;
 		rval_ind = k;
@@ -2786,7 +2840,7 @@ user_func* copy_user_func(const user_func* o) {
     return uf;
 }
 //deallocation
-void cleanup_user_func(user_func* uf) {
+void destroy_user_func(user_func* uf) {
     cleanup_func(&(uf->call_sig));
     if (uf->code_lines)
 	destroy_line_buffer(uf->code_lines);
@@ -2805,7 +2859,7 @@ value uf_eval(user_func* uf, context* c, cgs_func call) {
 	for (size_t i = 0; i < uf->call_sig.n_args; ++i) {
 	    set_value(func_scope, uf->call_sig.args[i].name, call.args[i].val, 0);
 	}
-	cleanup_context(func_scope);
+	destroy_context(func_scope);
     }
     return make_val_error(E_BAD_VALUE, "function not implemented");
     /*er = E_SUCCESS;

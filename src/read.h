@@ -1,13 +1,12 @@
 #ifndef READ_H
 #define READ_H
 
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
 #include <stdarg.h>
 #include <errno.h>
-
-#include "utils.h"
 
 //hints for dynamic buffer sizes
 #define ERR_BSIZE	1024
@@ -184,7 +183,7 @@ size_t read_cgs_line(char** bufptr, size_t* n, FILE* fp, size_t* lineno);
   * Note: this function performs trimming "in place"
   * returns: the length of the string including the null terminator
   */
-char* CGS_trim_whitespace(char* str, size_t* len);
+char* trim_whitespace(char* str, size_t* len);
 /**
  * write at most n bytes of the double valued x to str
  */
@@ -284,6 +283,10 @@ value make_val_num(double x);
  * create a value from a string
  */
 value make_val_str(const char* s);
+/**
+ * create a value from a c array of doubles
+ */
+value make_val_array(double* vs, size_t n);
 /**
  * create a value from a list
  */
@@ -429,18 +432,18 @@ typedef struct read_state {
 
 inline size_t con_size(const context* c) { if (!c) return 0;return 1 << c->t_bits; }
 /**
- * make an empty context. The result must be destroyed using cleanup_context().
+ * make an empty context. The result must be destroyed using destroy_context().
  * parent: the parent of this context so that we can look up in scope (i.e. a function can access global variables)
  */
 struct context* make_context(context* parent);
 /**
- * Create a deep copy of the context o and return the result. The result must be destroyed using cleanup_context().
+ * Create a deep copy of the context o and return the result. The result must be destroyed using destroy_context().
  */
 struct context* copy_context(const context* o);
 /**
  * cleanup the context c
  */
-void cleanup_context(context* c);
+void destroy_context(context* c);
 /**
  * Execute the mathematical operation in the string str at the location op_ind
  */
@@ -456,6 +459,36 @@ void setup_builtins(struct context* c);
  * returns: the matching value, no deep copies are performed
  */
 value lookup(const struct context* c, const char* name);
+/**
+ * Lookup the value named str in c and write the first n elements of the resulting list/array to sto
+ * c: the context to search
+ * str: the name to lookup
+ * sto: the array to save to
+ * n: the length of sto
+ * returns: the number of elements written on success or a negative value if an error occurred (-1 indicates no match, -2 indicates match of the wrong type, -3 indicates an invalid element)
+ */
+int lookup_c_array(const context* c, const char* str, double* sto, size_t n);
+/**
+ * Lookup the value named str in c and write the string sto
+ * c: the context to search
+ * str: the name to lookup
+ * sto: the array to save to
+ * n: the length of sto
+ * returns: the number of elements written on success or a negative value if an error occurred (-1 indicates no match, -2 indicates match of the wrong type, -3 indicates an invalid element)
+ */
+int lookup_c_str(const context* c, const char* str, char* sto, size_t n);
+/**
+ * lookup the integer value in c at str and return the result. on error 0 is returned and er is set to 1
+ */
+int lookup_int(const context* c, const char* str, int* er);
+/**
+ * lookup the integer value in c at str and return the result. on error 0 is returned and er is set to 1
+ */
+size_t lookup_uint(const context* c, const char* str, int* er);
+/**
+ * lookup the floating point value in c at str and return the result. on error 0 is returned and er is set to 1
+ */
+double lookup_float(const context* c, const char* str, int* er);
 /**
  * Set the value with a name matching p_name to a copy of p_val
  * name: the name of the variable to set
@@ -523,7 +556,7 @@ user_func* copy_user_func(const user_func* o);
 /**
  * Dealocate memory used for uf
  */
-void cleanup_user_func(user_func* uf);
+void destroy_user_func(user_func* uf);
 /**
  * evaluate the function
  */
