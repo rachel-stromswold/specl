@@ -1155,7 +1155,7 @@ TEST_CASE("context parsing") {
 }
 value cgs_gen_gaussian_source(context* c, cgs_func f) {
     static const valtype SRC_SIG[] = {VAL_STR, VAL_NUM, VAL_NUM, VAL_NUM, VAL_NUM, VAL_NUM};
-    value ret = check_signature(f, SIGLEN(SRC_SIG), SIGLEN(SRC_SIG)+3, SRC_SIG, 1);
+    value ret = check_signature(f, SIGLEN(SRC_SIG), SIGLEN(SRC_SIG)+3, SRC_SIG);
     if (ret.type)
 	return ret;
     if (f.args[f.n_args-1].val.type != VAL_INST)
@@ -1183,7 +1183,7 @@ value cgs_gen_gaussian_source(context* c, cgs_func f) {
 }
 value cgs_gen_box(context* c, cgs_func f) {
     static const valtype BOX_SIG[] = {VAL_ARRAY, VAL_ARRAY};   
-    value ret = check_signature(f, SIGLEN(BOX_SIG), SIGLEN(BOX_SIG)+3, BOX_SIG, 1);
+    value ret = check_signature(f, SIGLEN(BOX_SIG), SIGLEN(BOX_SIG)+3, BOX_SIG);
     if (ret.type)
 	return ret;
     ret = make_val_inst(c, "Box");
