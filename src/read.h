@@ -1,12 +1,13 @@
 #ifndef READ_H
 #define READ_H
 
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
+#include <errno.h>
 #include <math.h>
 #include <stdarg.h>
-#include <errno.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 //hints for dynamic buffer sizes
 #define ERR_BSIZE	1024
@@ -166,10 +167,7 @@ int TYPED(STACK_PEEK,TYPE)(stack(TYPE)* s, size_t ind, TYPE* sto) {			\
 #define peek(TYPE) TYPED(STACK_PEEK,TYPE)
 
 /** ======================================================== utility functions ======================================================== **/
-/**
- * Find the first instance of a token (i.e. surrounded by whitespace) in the string str which matches comp
- */
-char* token_block(char* str, const char* comp);
+
 /**
  * This acts similar to getline, but stops at a semicolon, newline (unless preceeded by a \), {, or }.
  * bufptr: a pointer to which the buffer is saved. If bufptr is NULL than a new buffer is allocated through malloc()
@@ -179,12 +177,6 @@ char* token_block(char* str, const char* comp);
  * Returns: the number of characters read (including null termination). On reaching the end of the file, 0 is returned.
  */
 size_t read_cgs_line(char** bufptr, size_t* n, FILE* fp, size_t* lineno);
-/**
-  * Remove the whitespace surrounding a word
-  * Note: this function performs trimming "in place"
-  * returns: the length of the string including the null terminator
-  */
-char* trim_whitespace(char* str, size_t* len);
 /**
  * write at most n bytes of the double valued x to str
  */
@@ -209,13 +201,17 @@ char* append_to_line(char* line, size_t* line_off, size_t* line_size, const char
 
 /** ============================ line_buffer ============================ **/
 
-typedef struct line_buffer_ind {
+/**
+ * store the position within a line_buffer, both line and offset in the line
+ */
+typedef struct lbi {
     size_t line;
     size_t off;
-} line_buffer_ind;
-line_buffer_ind make_lbi(size_t pl, size_t po);
-line_buffer_ind lbi_add(line_buffer_ind lhs, size_t rhs);
-line_buffer_ind lbi_sub(line_buffer_ind lhs, size_t rhs);
+} lbi;
+lbi make_lbi(size_t pl, size_t po);
+lbi lbi_add(lbi lhs, size_t rhs);
+lbi lbi_sub(lbi lhs, size_t rhs);
+int lbi_comp(lbi lhs, lbi rhs);
 
 typedef struct line_buffer {
     char** lines;
@@ -229,16 +225,65 @@ line_buffer* make_line_buffer_sep(const char* line, char sep);
 line_buffer* copy_line_buffer(const line_buffer* o);
 void lb_split(line_buffer* lb, char split_delim);
 #if DEBUG_INFO>0
-int it_single(const line_buffer* lb, char** linesto, char start_delim, char end_delim, line_buffer_ind* start, line_buffer_ind* end, int* pdepth, int include_delims, int include_start);
+int it_single(const line_buffer* lb, char** linesto, char start_delim, char end_delim, lbi* start, lbi* end, int* pdepth, int include_delims, int include_start);
 #endif
-line_buffer* lb_get_enclosed(const line_buffer* lb, line_buffer_ind start, line_buffer_ind* pend, char start_delim, char end_delim, int include_delims, int include_start);
-line_buffer_ind lb_jmp_enclosed(line_buffer* lb, line_buffer_ind start, char start_delim, char end_delim, int include_delims);
-char* lb_get_line(const line_buffer* lb, line_buffer_ind p);
+/**
+ * Find the line buffer starting on line start_line between the first instance of start_delim and the last instance of end_delim respecting nesting (i.e. if lines={"a {", "b {", "}", "} c"} then {"b {", "}"} is returned. Note that the result must be deallocated with a call to free().
+ * start_line: the line to start reading from
+ * end_line: if this value is not NULL, then the index of the line on which end_delim was found is stored here. If the end delimeter is not found, then the line is set to n_lines and the offset is set to zero
+ * start_delim: the character to be used as the starting delimiter. This needs to be supplied so that we find a matching end_delim at the root level
+ * end_delim: the character to be searched for
+ * line_offset: the character on line start_line to start reading from, this defaults to zero. Note that this only applies to the start_line, and not any subsequent lines in the buffer.
+ * include_delims: if true, then the delimeters are included in the enclosed strings. defualts to false
+ * include_start: if true, then the part preceeding the first instance of start_delim will be included. This value is always false if include_delims is false. If include_delims is true, then this defaults to true.
+ * returns: a line_buffer object which should be destroyed with a call to destroy_line_buffer().
+ */
+line_buffer* lb_get_enclosed(const line_buffer* lb, lbi start, lbi* pend, char start_delim, char end_delim, int include_delims, int include_start);
+/**
+ * Jump to the end of the next enclosed block started with a start_delim character
+ * lb: the linebuffer
+ * start: the location from which we start seeking
+ * start_delim: the starting delimeter to look for (e.g. '(','{'... corresponding to ')','}'... respectively)
+ * end_delim: the ending delimiter to look for, see above
+ * include_delims: if true, then include the delimeter in the libe buffer
+ */
+lbi lb_jmp_enclosed(line_buffer* lb, lbi start, char start_delim, char end_delim, int include_delims);
+/**
+ * Return a string with the line contained between indices b (inclusive) and e (not inclusive).
+ * lb: the line_buffer to read
+ * b: the beginning to read from
+ * e: read up to this character unless e <= b in which case reading goes to the end of the line
+ * returns: a string with the contents between b and e. This string should be freed with a call to free().
+ */
+char* lb_get_line(const line_buffer* lb, lbi b, lbi e);
+/**
+ * Return the size of the line with index i.
+ */
 size_t lb_get_line_size(const line_buffer* lb, size_t i);
+/**
+ * Returns a version of the line buffer which is flattened so that everything fits onto one line.
+ * sep_char: each newline in the buffer is replaced by a sep_char, unless sep_char=0 in which no characters are inserted
+ * len: a pointer which if not null will hold the length of the string including the null terminator
+ */
 char* lb_flatten(const line_buffer* lb, char sep_char, size_t* len);
-int lb_inc(const line_buffer* lb, line_buffer_ind* p);
-int lb_dec(const line_buffer* lb, line_buffer_ind* p);
-char lb_get(const line_buffer* lb, line_buffer_ind pos);
+/**
+ * move the line buffer forward by one character
+ * p: the index to start at
+ */
+lbi lb_add(const line_buffer* lb, lbi p, size_t rhs);
+/**
+ * move the line buffer back by one character
+ * p: the index to start at
+ */
+lbi lb_sub(const line_buffer* lb, lbi p, size_t rhs);
+/**
+ * return how many characters into the line buffer l is
+ */
+size_t lb_diff(const line_buffer* lb, lbi r, lbi l);
+/**
+ * returns the character at position pos
+ */
+char lb_get(const line_buffer* lb, lbi pos);
 
 /** ============================ struct value ============================ **/
 
@@ -426,7 +471,8 @@ typedef struct context context;
  */
 typedef struct read_state {
     const line_buffer* b;
-    line_buffer_ind pos;
+    lbi pos;
+    lbi end;
     size_t buf_size;
     char* buf;
 } read_state;
@@ -448,7 +494,7 @@ void destroy_context(context* c);
 /**
  * Execute the mathematical operation in the string str at the location op_ind
  */
-value do_op(struct context* c, char* tok, size_t ind);
+value do_op(struct context* c, read_state rs, lbi op_loc);
 /**
  * include builtin functions
  * TODO: make this not dumb
@@ -526,7 +572,7 @@ func_call parse_func(struct context* c, char* token, long open_par_ind, value* v
  * str: the string expression to parse
  * returns: a value with the resultant expression
  */
-value parse_value(struct context* c, char* tok);
+value parse_value(struct context* c, char* str);
 /**
  * Generate a context from a list of lines. This context will include function declarations, named variables, and subcontexts (instances).
  * lines: the array of lines to read from

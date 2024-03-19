@@ -357,12 +357,6 @@ TEST_CASE("string handling") {
     context* sc = make_context(NULL);
     char buf[STR_SIZE];
     size_t len;
-    //check that trimming an empty string works
-    buf[0] = 0;
-    char* str = trim_whitespace(buf, &len);
-    REQUIRE(str == buf);
-    CHECK(len == 0);
-    CHECK(str[0] == 0);
     //check that parsing an empty (or all whitespace) string gives VAL_UNDEF
     value tmp_val = parse_value(sc, buf);
     CHECK(tmp_val.type == VAL_UNDEF);
@@ -766,20 +760,24 @@ TEST_CASE("builtin functions") {
     destroy_context(sc);
 }
 
+char* fetch_lb_line(const line_buffer* lb, size_t line, size_t off) {
+    lbi tmp = make_lbi(line,off);
+    return lb_get_line(lb, tmp, tmp);
+}
 TEST_CASE("line_buffer splitting") {
     const char* lines[] = { "apple; banana;c", ";orange" };
     size_t n_lines = sizeof(lines)/sizeof(char*);
     line_buffer* lb = make_line_buffer_lines(lines, n_lines);
     CHECK(lb->n_lines == 2);
-    char* strval = lb_get_line(lb, make_lbi(0, 0));CHECK(strcmp(lines[0], strval) == 0);free(strval);
-    strval = lb_get_line(lb, make_lbi(1, 0));CHECK(strcmp(lines[1], strval) == 0);free(strval);
+    char* strval = fetch_lb_line(lb, 0, 0);CHECK(strcmp(lines[0], strval) == 0);free(strval);
+    strval = fetch_lb_line(lb, 1, 0);CHECK(strcmp(lines[1], strval) == 0);free(strval);
     lb_split(lb, ';');
     CHECK(lb->n_lines == 5);
-    strval = lb_get_line(lb, make_lbi(0, 0));CHECK(strcmp("apple", strval) == 0);free(strval);
-    strval = lb_get_line(lb, make_lbi(1, 0));CHECK(strcmp(" banana", strval) == 0);free(strval);
-    strval = lb_get_line(lb, make_lbi(2, 0));CHECK(strcmp("c", strval) == 0);free(strval);
-    strval = lb_get_line(lb, make_lbi(3, 0));CHECK(strcmp("", strval) == 0);free(strval);
-    strval = lb_get_line(lb, make_lbi(4, 0));CHECK(strcmp("orange", strval) == 0);free(strval);
+    strval = fetch_lb_line(lb, 0, 0);CHECK(strcmp("apple", strval) == 0);free(strval);
+    strval = fetch_lb_line(lb, 1, 0);CHECK(strcmp(" banana", strval) == 0);free(strval);
+    strval = fetch_lb_line(lb, 2, 0);CHECK(strcmp("c", strval) == 0);free(strval);
+    strval = fetch_lb_line(lb, 3, 0);CHECK(strcmp("", strval) == 0);free(strval);
+    strval = fetch_lb_line(lb, 4, 0);CHECK(strcmp("orange", strval) == 0);free(strval);
     destroy_line_buffer(lb);
 }
 
@@ -793,8 +791,8 @@ TEST_CASE("test line_buffer it_single") {
     char* it_single_str = NULL;
     //including braces
     for (size_t i = 0; i < n_lines; ++i) {
-	line_buffer_ind start = make_lbi(i, 0);
-	line_buffer_ind end = make_lbi(i, 0);
+	lbi start = make_lbi(i, 0);
+	lbi end = make_lbi(i, 0);
 	int it_start = it_single(lb, &it_single_str, '{', '}', &start, &end, &depth, true, false);
 	if (i == 1)
 	    CHECK(it_start == 0);
@@ -816,8 +814,8 @@ TEST_CASE("test line_buffer it_single") {
     //excluding braces
     const char* lines_exc[] = { "def test_fun(a)", "", "if a > 5 {", "return 1", "}", "return 0", "}" };
     for (size_t i = 0; i < n_lines; ++i) {
-	line_buffer_ind start = make_lbi(i, 0);
-	line_buffer_ind end = make_lbi(i, 0);
+	lbi start = make_lbi(i, 0);
+	lbi end = make_lbi(i, 0);
 	int it_start = it_single(lb, &it_single_str, '{', '}', &start, &end, &depth, false, false);
 	if (i == 1)
 	    CHECK(it_start == 0);
@@ -854,7 +852,7 @@ TEST_CASE("line_buffer lb_get_enclosed") {
     size_t fun_n = sizeof(fun_contents)/sizeof(char*);
     size_t if_n = sizeof(if_contents)/sizeof(char*);
 
-    line_buffer_ind end_ind;
+    lbi end_ind;
     char* strval = NULL;
 
     SUBCASE("open brace on a different line") {
@@ -863,25 +861,25 @@ TEST_CASE("line_buffer lb_get_enclosed") {
 	//check the lines (curly brace on new line)
 	line_buffer* lb = make_line_buffer_lines(lines, n_lines);
 	for (size_t i = 0; i < n_lines; ++i) {
-	    strval = lb_get_line(lb, make_lbi(i, 0));CHECK(strcmp(lines[i], strval) == 0);free(strval);
+	    strval = fetch_lb_line(lb, i, 0);CHECK(strcmp(lines[i], strval) == 0);free(strval);
 	}
 	//test wrapper functions that use it_single
-	line_buffer_ind bstart;
+	lbi bstart;
 	line_buffer* b_fun_con = lb_get_enclosed(lb, bstart, &end_ind, '{', '}', 0, 0);
 	CHECK(b_fun_con->n_lines == fun_n);
 	CHECK(end_ind.line == 6);
 	for (size_t i = 0; i < fun_n; ++i) {
-	    strval = lb_get_line(b_fun_con, make_lbi(i,0));CHECK(strcmp(fun_contents[i], strval) == 0);free(strval);
+	    strval = fetch_lb_line(b_fun_con, i,0);CHECK(strcmp(fun_contents[i], strval) == 0);free(strval);
 	}
 	line_buffer* b_if_con = lb_get_enclosed(b_fun_con, bstart, &end_ind, '{', '}', 0, 0);
 	CHECK(b_if_con->n_lines == if_n);
 	CHECK(end_ind.line == 3);
 	for (size_t i = 0; i < if_n; ++i) {
-	    strval = lb_get_line(b_if_con, make_lbi(i,0));CHECK(strcmp(if_contents[i], strval) == 0);free(strval);
+	    strval = fetch_lb_line(b_if_con, i,0);CHECK(strcmp(if_contents[i], strval) == 0);free(strval);
 	}
 	//check jumping
-	line_buffer_ind blk_start = make_lbi(0,0);
-	line_buffer_ind blk_end_ind = lb_jmp_enclosed(lb, blk_start, '{', '}', 0);
+	lbi blk_start = make_lbi(0,0);
+	lbi blk_end_ind = lb_jmp_enclosed(lb, blk_start, '{', '}', 0);
 	CHECK(blk_end_ind.line == 6);
 	CHECK(blk_end_ind.off == 0);
 	blk_end_ind = lb_jmp_enclosed(lb, blk_start, '{', '}', true);
@@ -908,26 +906,26 @@ TEST_CASE("line_buffer lb_get_enclosed") {
 	//check the lines (curly brace on same line)
 	line_buffer* lb = make_line_buffer_lines(lines, n_lines);
 	for (size_t i = 0; i < n_lines; ++i) {
-	    strval = lb_get_line(lb, make_lbi(i,0));CHECK(strcmp(lines[i], strval) == 0);free(strval);
+	    strval = fetch_lb_line(lb, i,0);CHECK(strcmp(lines[i], strval) == 0);free(strval);
 	}
 	//test wrapper functions that use it_single
-	line_buffer_ind bstart;
+	lbi bstart;
 	line_buffer* b_fun_con = lb_get_enclosed(lb, bstart, &end_ind, '{', '}', 0, 0);
 	CHECK(b_fun_con->n_lines == fun_n);
 	CHECK(end_ind.line == 5);
 	for (size_t i = 0; i < fun_n; ++i) {
-	    strval = lb_get_line(b_fun_con, make_lbi(i,0));CHECK(strcmp(fun_contents[i], strval) == 0);free(strval);
+	    strval = fetch_lb_line(b_fun_con, i,0);CHECK(strcmp(fun_contents[i], strval) == 0);free(strval);
 	}
 	line_buffer* b_if_con_2 = lb_get_enclosed(b_fun_con, bstart, &end_ind, '{', '}', 0, 0);
 	CHECK(b_if_con_2->n_lines == if_n);
 	CHECK(end_ind.line == 3);
 	for (size_t i = 0; i < if_n; ++i) {
-	    strval = lb_get_line(b_if_con_2, make_lbi(i,0));CHECK(strcmp(if_contents[i], strval) == 0);free(strval);
+	    strval = fetch_lb_line(b_if_con_2, i,0);CHECK(strcmp(if_contents[i], strval) == 0);free(strval);
 	}
 	destroy_line_buffer(b_if_con_2);
 	//check jumping
-	line_buffer_ind blk_start = make_lbi(0,0);
-	line_buffer_ind blk_end_ind = lb_jmp_enclosed(b_fun_con, blk_start, '{', '}', 0);
+	lbi blk_start = make_lbi(0,0);
+	lbi blk_end_ind = lb_jmp_enclosed(b_fun_con, blk_start, '{', '}', 0);
 	CHECK(blk_end_ind.line == 3);
 	CHECK(blk_end_ind.off == 0);
 	blk_end_ind = lb_jmp_enclosed(b_fun_con, blk_start, '{', '}', true);
@@ -953,21 +951,21 @@ TEST_CASE("line_buffer lb_get_enclosed") {
 	//check the lines (curly brace on new line)
 	line_buffer* lb = make_line_buffer_lines(lines, n_lines);
 	for (size_t i = 0; i < n_lines; ++i) {
-	    strval = lb_get_line(lb, make_lbi(i,0));CHECK(strcmp(lines[i], strval) == 0);free(strval);
+	    strval = fetch_lb_line(lb, i,0);CHECK(strcmp(lines[i], strval) == 0);free(strval);
 	}
 	//test wrapper functions that use it_single
-	line_buffer_ind bstart;
+	lbi bstart;
 	line_buffer* b_fun_con = lb_get_enclosed(lb, bstart, &end_ind, '{', '}', 0, 0);
 	CHECK(b_fun_con->n_lines == 1);
 	CHECK(end_ind.line == 0);
-	strval = lb_get_line(b_fun_con, make_lbi(0,0));CHECK(strcmp("if a > 5 {return 1}return 0", strval) == 0);free(strval);
+	strval = fetch_lb_line(b_fun_con, 0,0);CHECK(strcmp("if a > 5 {return 1}return 0", strval) == 0);free(strval);
 	line_buffer* b_if_con = lb_get_enclosed(b_fun_con, bstart, &end_ind, '{', '}', 0, 0);
 	CHECK(b_if_con->n_lines == 1);
 	CHECK(end_ind.line == 0);
-	strval = lb_get_line(b_if_con, make_lbi(0,0));CHECK(strcmp("return 1", strval) == 0);free(strval);
+	strval = fetch_lb_line(b_if_con, 0,0);CHECK(strcmp("return 1", strval) == 0);free(strval);
 	//check jumping
-	line_buffer_ind blk_start;
-	line_buffer_ind blk_end_ind = lb_jmp_enclosed(b_fun_con, blk_start, '{', '}', 0);
+	lbi blk_start;
+	lbi blk_end_ind = lb_jmp_enclosed(b_fun_con, blk_start, '{', '}', 0);
 	CHECK(blk_end_ind.line == 0);
 	CHECK(blk_end_ind.off == 18);
 	blk_end_ind = lb_jmp_enclosed(b_fun_con, blk_start, '{', '}', true);

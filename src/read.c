@@ -36,13 +36,19 @@ static inline int is_char_sep(char c) {
 
 /**
  * Helper function which looks at the string str at index i and tests whether it is a token with the matching name
+ * str: the string to test
+ * i: the index in the string to examine
+ * cmp: the token string to compare with
+ * len: the length of the token string to compare with
  */
-static inline int is_token(const char* str, size_t i, size_t len) {
+static inline int is_token(const char* str, size_t i, const char* cmp, size_t len) {
     if (i > 0 && !is_char_sep(str[i-1]))
 	return 0;
     if (!is_char_sep(str[i+len]))
 	return 0;
-    return 1;
+    if (cmp == NULL || strncmp(str+i, cmp, len))
+	return 1;
+    return 0;
 }
 
 /**
@@ -96,15 +102,17 @@ static inline char* strchr_block(char* str, char c) {
     return NULL;
 }
 
-char* token_block(char* str, const char* comp) {
-    if (!str || !comp) return NULL;
+/**
+ * Find the first instance of a token (i.e. surrounded by whitespace) in the string str which matches comp
+ */
+static inline char* token_block(char* str, const char* cmp, size_t cmp_len) {
+    if (!str || !cmp)
+	return NULL;
     stack(size_t) blk_stk = make_stack(size_t)();
     size_t j;
     for (size_t i = 0; str[i] != 0; ++i) {
 	if (blk_stk.ptr == 0) {
-	    j = 0;
-	    while (comp[j] && str[i+j] && str[i+j] == comp[j]) ++j;
-	    if (comp[j] == 0 && is_token(str, i, j))
+	    if (is_token(str, i, cmp, cmp_len))
 		return str+i;
 	}
 	if (str[i] == '('/*)*/) {
@@ -150,13 +158,18 @@ int write_numeric(char* str, size_t n, double x) {
     return snprintf(str, n, "%f", x);
 }
 
-char* trim_whitespace(char* str, size_t* len) {
+/**
+  * Remove the whitespace surrounding a word
+  * Note: this function performs trimming "in place"
+  * returns: the length of the string including the null terminator
+  */
+static inline char* trim_whitespace(char* str, size_t* len) {
     if (!str) return NULL;
     size_t start_ind = 0;
     int started = 0;
     _uint last_non = 0;
-    for (_uint i = 0; str[i] != 0; ++i) {
-        if (str[i] != ' ' && str[i] != '\t' && str[i] != '\n') {
+    for (_uint i = 0; str[i]; ++i) {
+        if (!is_whitespace(str[i])) {
             last_non = i;
             if (!started) {
                 start_ind = i;
@@ -164,8 +177,7 @@ char* trim_whitespace(char* str, size_t* len) {
             }
         }
     }
-    str[last_non+1] = 0;
-    if (len) *len = last_non - start_ind;
+    if (len) *len = last_non - start_ind + 1;
     return str+start_ind;
 }
 
@@ -280,32 +292,26 @@ char* append_to_line(char* line, size_t* line_off, size_t* line_size, const char
     return line;
 }
 
-/** ============================ line_buffer_ind ============================ **/
+/** ============================ lbi ============================ **/
 
 //create a new line buffer with the given line index and offset
-line_buffer_ind make_lbi(size_t p_line, size_t p_off) {
-    line_buffer_ind ret;
+lbi make_lbi(size_t p_line, size_t p_off) {
+    lbi ret;
     ret.line = p_line;
     ret.off = p_off;
     return ret;
 }
-//increase the line buffer lhs by rhs characters while keeping line number the same
-line_buffer_ind lbi_add(line_buffer_ind lhs, size_t rhs) {
-    line_buffer_ind ret;
-    ret.line = lhs.line;
-    ret.off = lhs.off + rhs;
-    return ret;
-}
 
-//decrease the line buffer lhs by rhs characters while keeping line number the same
-line_buffer_ind lbi_sub(line_buffer_ind lhs, size_t rhs) {
-    line_buffer_ind ret;
-    ret.line = lhs.line;
-    if (rhs > lhs.off)
-        ret.off = 0;
-    else
-        ret.off = lhs.off - rhs;
-    return ret;
+int lbi_comp(lbi l, lbi r) {
+    if (l.line < r.line)
+	return -1;
+    if (l.line > r.line)
+	return 1;
+    if (l.off < r.off)
+	return -1;
+    if (l.off > r.off)
+	return 1;
+    return 0;
 }
 
 /** ============================ line_buffer ============================ **/
@@ -467,6 +473,52 @@ line_buffer* copy_line_buffer(const line_buffer* o) {
     return lb;
 }
 
+//increase the line buffer lhs by rhs characters while keeping line number the same
+lbi lb_add(const line_buffer* lb, lbi lhs, size_t rhs) {
+    if (lhs.line >= lb->n_lines)
+	return lhs;
+    lbi ret = make_lbi(lhs.line, lhs.off);
+    if (ret.off < lb->line_sizes[ret.line])
+	return ret;
+    //otherwise we have to move up a line
+    size_t rem = ret.off - lb->line_sizes[ret.line];
+    while (ret.off >= lb->line_sizes[ret.line]) {
+	ret.off -= rem;
+	//make sure we aren't out of bounds
+	if (++ret.line >= lb->n_lines)
+	    return make_lbi(lb->n_lines, 0);
+	rem = ret.off - lb->line_sizes[ret.line];
+    }
+    return ret;
+}
+
+//decrease the line buffer lhs by rhs characters while keeping line number the same
+lbi lb_sub(const line_buffer* lb, lbi lhs, size_t rhs) {
+    if (lhs.line >= lb->n_lines)
+	lhs.line = lb->n_lines-1;
+    lbi ret = make_lbi(lhs.line, lhs.off);
+    while (rhs > ret.off) {
+	if (ret.line == 0)
+	    return make_lbi(0,0);
+	rhs -= ret.off;
+	ret.line--;
+	ret.off = lb->line_sizes[ret.line] - 1;
+    }
+    return ret;
+}
+
+size_t lb_diff(const line_buffer* lb, lbi r, lbi l) {
+    size_t ret = 0;
+    while (1) {
+	ret += l.off;
+	if (l.line == r.line)
+	    break;
+	l.off = lb->line_sizes[--l.line];
+    }
+    ret -= r.off;
+    return ret;
+}
+
 /**
  * Goes through a line buffer and splits into multiple lines at each instance of split_delim.
  * i.e. if the buffer is in the state
@@ -514,10 +566,10 @@ void lb_split(line_buffer* lb, char split_delim) {
 #if DEBUG_INFO<1
 static inline
 #endif
-int it_single(const line_buffer* lb, char** linesto, char start_delim, char end_delim, line_buffer_ind* start, line_buffer_ind* end, int* pdepth, int include_delims, int include_start) {
+int it_single(const line_buffer* lb, char** linesto, char start_delim, char end_delim, lbi* start, lbi* end, int* pdepth, int include_delims, int include_start) {
     int free_after = 0;
     if (start == NULL) {
-        start = (line_buffer_ind*)malloc(sizeof(line_buffer_ind));
+        start = (lbi*)malloc(sizeof(lbi));
         start->line = 0;
         start->off = 0;
     }
@@ -596,18 +648,7 @@ int it_single(const line_buffer* lb, char** linesto, char start_delim, char end_
     return ret;
 }
 
-/**
- * Find the line buffer starting on line start_line between the first instance of start_delim and the last instance of end_delim respecting nesting (i.e. if lines={"a {", "b {", "}", "} c"} then {"b {", "}"} is returned. Note that the result must be deallocated with a call to free().
- * start_line: the line to start reading from
- * end_line: if this value is not NULL, then the index of the line on which end_delim was found is stored here. If the end delimeter is not found, then the line is set to n_lines and the offset is set to zero
- * start_delim: the character to be used as the starting delimiter. This needs to be supplied so that we find a matching end_delim at the root level
- * end_delim: the character to be searched for
- * line_offset: the character on line start_line to start reading from, this defaults to zero. Note that this only applies to the start_line, and not any subsequent lines in the buffer.
- * include_delims: if true, then the delimeters are included in the enclosed strings. defualts to false
- * include_start: if true, then the part preceeding the first instance of start_delim will be included. This value is always false if include_delims is false. If include_delims is true, then this defaults to true.
- * returns: a line_buffer object which should be destroyed with a call to destroy_line_buffer().
- */
-line_buffer* lb_get_enclosed(const line_buffer* lb, line_buffer_ind start, line_buffer_ind* pend, char start_delim, char end_delim, int include_delims, int include_start) {
+line_buffer* lb_get_enclosed(const line_buffer* lb, lbi start, lbi* pend, char start_delim, char end_delim, int include_delims, int include_start) {
     line_buffer* ret = alloc_line_buffer();
     //initialization
     if (pend) {
@@ -630,7 +671,7 @@ line_buffer* lb_get_enclosed(const line_buffer* lb, line_buffer_ind start, line_
     //iterate through lines
     size_t k = 0;
     size_t start_line = start.line;
-    line_buffer_ind end;
+    lbi end;
     size_t i = start.line;
     int started = 0;
     for (; depth >= 0 && i < lb->n_lines; ++i) {
@@ -662,18 +703,10 @@ line_buffer* lb_get_enclosed(const line_buffer* lb, line_buffer_ind start, line_
     return ret;
 }
 
-/**
- * Jump to the end of the next enclosed block started with a start_delim character
- * lb: the linebuffer
- * start: the location from which we start seeking
- * start_delim: the starting delimeter to look for (e.g. '(','{'... corresponding to ')','}'... respectively)
- * end_delim: the ending delimiter to look for, see above
- * include_delims: if true, then include the delimeter in the libe buffer
- */
-line_buffer_ind lb_jmp_enclosed(line_buffer* lb, line_buffer_ind start, char start_delim, char end_delim, int include_delims) {
+lbi lb_jmp_enclosed(line_buffer* lb, lbi start, char start_delim, char end_delim, int include_delims) {
     int depth = 0;
     for (size_t i = start.line; depth >= 0 && i < lb->n_lines; ++i) {
-        line_buffer_ind end;
+        lbi end;
         end.line = i;
         end.off = 0;
         it_single(lb, NULL, start_delim, end_delim, &start, &end, &depth, include_delims, 0);
@@ -682,39 +715,38 @@ line_buffer_ind lb_jmp_enclosed(line_buffer* lb, line_buffer_ind start, char sta
         start.off = 0;
         ++start.line;
     }
-    line_buffer_ind ret;
+    lbi ret;
     ret.line = lb->n_lines;
     ret.off = 0;
     return ret;
 }
 
-/**
- * Return a string with the line contained at index i. This string should be freed with a call to free().
- */
-char* lb_get_line(const line_buffer* lb, line_buffer_ind p) {
-    if (p.line >= lb->n_lines) {
+char* lb_get_line(const line_buffer* lb, lbi b, lbi e) {
+    if (b.line >= lb->n_lines) {
         return NULL;
     }
-    size_t line_size = lb->line_sizes[p.line] + 1;
-    char* ret = (char*)malloc(sizeof(char) * (line_size - p.off));
-    for (size_t j = p.off; j < line_size; ++j)
-        ret[j - p.off] = lb->lines[p.line][j];
-    ret[line_size - p.off - 1] = 0;
+    //figure out how much space we should allocate
+    size_t tot_size = lb->line_sizes[b.line] - b.off;
+    for (size_t i = b.line+1; i < lb->n_lines && i <= e.line; ++i)
+	tot_size += lb->line_sizes[b.line];
+    tot_size = tot_size - b.off + 1;
+    //allocate it and copy
+    char* ret = (char*)malloc(sizeof(char)*tot_size);
+    size_t wi = 0;
+    do {
+	ret[wi++] = lb_get(lb, b);
+	b = lb_add(lb, b, 1);
+    } while (lbi_comp(b,e) < 0 && wi < tot_size);
+    ret[wi] = 0;
     return ret;
 }
-/**
- * Return the size of the line with index i.
- */
+
 size_t lb_get_line_size(const line_buffer* lb, size_t i) {
     if (i >= lb->n_lines)
 	return 0;
     return lb->line_sizes[i];
 }
-/**
- * Returns a version of the line buffer which is flattened so that everything fits onto one line.
- * sep_char: each newline in the buffer is replaced by a sep_char, unless sep_char=0 in which no characters are inserted
- * len: a pointer which if not null will hold the length of the string including the null terminator
- */
+
 char* lb_flatten(const line_buffer* lb, char sep_char, size_t* len) {
     //figure out how much memory must be allocated
     size_t tot_size = 1;
@@ -736,48 +768,7 @@ char* lb_flatten(const line_buffer* lb, char sep_char, size_t* len) {
     return ret;
 }
 
-/**
- * move the line buffer forward by one character
- * p: the index to start at
- */
-int lb_inc(const line_buffer* lb, line_buffer_ind* p) {
-    if (p->line >= lb->n_lines)
-        return 0;
-    if (p->off >= lb->line_sizes[p->line]) {
-        if (p->line == lb->n_lines - 1) {
-            return 0;
-        }
-        p->off = 0;
-        p->line += 1;
-    } else {
-        p->off += 1;
-    }
-    return 1;
-}
-
-/**
- * move the line buffer back by one character
- * p: the index to start at
- */
-int lb_dec(const line_buffer* lb, line_buffer_ind* p) {
-    if (p->line > lb->n_lines)
-        return 0;
-    if (p->off == 0) {
-        if (p->line == 0) {
-            return 0;
-        }
-        p->line -= 1;
-        p->off = lb->line_sizes[p->line];
-    } else {
-        p->off -= 1;
-    }
-    return 1;
-}
-
-/**
- * returns the character at position pos
- */
-char lb_get(const line_buffer* lb, line_buffer_ind pos) {
+char lb_get(const line_buffer* lb, lbi pos) {
     if (pos.line >= lb->n_lines || pos.off >= lb->line_sizes[pos.line])
         return 0;
     return lb->lines[pos.line][pos.off];
@@ -1748,12 +1739,12 @@ void cleanup_name_val_pair(name_val_pair nv) {
 
 /** ============================ context ============================ **/
 
-//non-cryptographically hash the string str
-static inline size_t fnv_1(const char* str, unsigned char t_bits) {
+//non-cryptographically hash the string str reading only the first n bytes
+static inline size_t fnv_1(const char* str, size_t n, unsigned char t_bits) {
     if (str == NULL)
 	return 0;
     size_t ret = FNV_OFFSET;
-    for (size_t i = 0; str[i]; ++i) {
+    for (size_t i = 0; str[i] && i < n; ++i) {
 	ret = ret^str[i];
 	ret = ret*FNV_PRIME;
     }
@@ -1775,7 +1766,7 @@ static inline size_t fnv_1(const char* str, unsigned char t_bits) {
  * returns: 1 if a match was found, 0 otherwise
  */
 static inline int find_ind(const struct context* c, const char* name, size_t* ind) {
-    size_t ii = fnv_1(name, c->t_bits);
+    size_t ii = fnv_1(name, SIZE_MAX, c->t_bits);
     size_t i = ii;
     while (c->table[i].name) {
 	if (strcmp(name, c->table[i].name) == 0) {
@@ -1872,48 +1863,54 @@ void destroy_context(struct context* c) {
     free(c->table);
     free(c);
 }
-value do_op(struct context* c, char* str, size_t i) {
+
+//forward declare so that helpers can call
+static inline value parse_value_rs(context* c, read_state rs);
+value do_op(context* c, read_state rs, lbi op_loc) {
     value sto = make_val_undef();
     //some operators (==, >=, <=) take up more than one character, test for these
     int op_width = 1;
-    if (str[i+1] == '=')
+    if (lb_get(rs.b, lb_add(rs.b, op_loc, 1)) == '=')
 	op_width = 2;
-    //Store the operation before setting it to zero
-    char term_char = str[i];
-    str[i] = 0;
+    char term_char = lb_get(rs.b, op_loc);
+    //set a read state before the operator and after the operator
+    read_state rs_l = rs;
+    read_state rs_r = rs;
+    rs_l.end = op_loc;
+    rs_r.pos = lb_add(rs.b, op_loc, op_width);
     //ternary operators and dereferences are special cases
     if (term_char == '?') {
 	//the colon must be present
-	char* col_ind = strchr_block(str+i+1, ':');
-	if (!col_ind)
+	char* col_loc = strchr_block(rs.b->lines[rs.pos.line], ':');
+	if (!col_loc)
 	    return make_val_error(E_BAD_SYNTAX, "expected : in ternary");
-	value l = parse_value(c, str);
+
+	value l = parse_value_rs(c, rs_l);
 	if (l.type == VAL_ERR)
 	    return l;
 	//0 branch
 	if (l.type == VAL_UNDEF || l.val.x == 0) {
-	    sto = parse_value(c, col_ind+1);
+	    rs_r.pos.off = col_loc - rs.b->lines[rs.pos.line] + 1;
+	    sto = parse_value_rs(c, rs_r);
 	    return sto;
 	} else {
 	    //1 branch
-	    *col_ind = 0;
-	    sto = parse_value(c, str+i+op_width);
-	    *col_ind = ':';
+	    rs_r.end.off = col_loc - rs.b->lines[rs.pos.line];
+	    sto = parse_value_rs(c, rs_r);
 	    return sto;
 	}
     } else if (term_char == '.') {
-	value inst_val = lookup(c, find_token_before(str, i));
+	value inst_val = lookup(c, find_token_before(rs.b->lines[rs_l.pos.line], op_loc.off));
 	if (inst_val.type != VAL_INST)
 	    return make_val_error(E_BAD_TYPE, "Error: tried to lookup from non instance type\n");
-	str[i] = term_char;
-	return parse_value(inst_val.val.c, str+i+1);
+	return parse_value_rs(inst_val.val.c, rs_r);
     }
 
     //parse right and left values
-    value l = parse_value(c, str);
+    value l = parse_value_rs(c, rs_l);
     if (l.type == VAL_ERR)
 	return l;
-    value r = parse_value(c, str+i+op_width);
+    value r = parse_value_rs(c, rs_r);
     if (r.type == VAL_ERR) {
 	cleanup_val(&l);
 	return r;
@@ -1924,7 +1921,7 @@ value do_op(struct context* c, char* str, size_t i) {
     sto.type = VAL_NUM;
     sto.n_els = 1;
     //handle equality comparisons
-    if (term_char == '=' && str[i+1] == '=') {
+    if (term_char == '=' && op_width == 2) {
 	sto.val.x = (value_cmp(l, r) == 0);
     } else if (term_char == '>') {
 	int cmp = value_cmp(l, r);
@@ -1932,7 +1929,7 @@ value do_op(struct context* c, char* str, size_t i) {
 	    sto = make_val_error(E_BAD_VALUE, "cannot compare types <%s> and <%s>", valnames[l.type], valnames[r.type]);
 	    goto finish;
 	}
-	if (str[i+1] == '=')
+	if (op_width == 2)
 	    sto.val.x = (cmp >= 0);
 	else
 	    sto.val.x = (cmp > 0);
@@ -1942,19 +1939,19 @@ value do_op(struct context* c, char* str, size_t i) {
 	    sto = make_val_error(E_BAD_VALUE, "cannot compare types <%s> and <%s>", valnames[l.type], valnames[r.type]);
 	    goto finish;
 	}
-	if (str[i+1] == '=')
+	if (op_width == 2)
 	    sto.val.x = (cmp <= 0);
 	else
 	    sto.val.x = (cmp < 0);
     //handle arithmetic
-    } else if (term_char == '+' && (i == 0 || str[i-1] != 'e')) {
+    } else if (term_char == '+' && (op_loc.off > 0 && rs.b->lines[op_loc.line][op_loc.off-1] == 'e')) {
         val_add(&l, r);
 	goto finish_arith;
     } else if (term_char == '-') {
         val_sub(&l, r);
 	goto finish_arith;
     } else if (term_char == '*') {
-	if (str[i+1] == '*')
+	if (rs.b->lines[op_loc.line][op_loc.off+1] == '*')
 	    val_exp(&l, r);
 	else
 	    val_mul(&l, r);
@@ -1964,12 +1961,10 @@ value do_op(struct context* c, char* str, size_t i) {
 	goto finish_arith;
     }
 finish:
-    str[i] = term_char;
     cleanup_val(&l);
     cleanup_val(&r);
     return sto;
 finish_arith:
-    str[i] = term_char;
     cleanup_val(&r);
     return l;
 }
@@ -2003,6 +1998,16 @@ void setup_builtins(struct context* c) {
     set_value(c, "math", tmp, 0);
 }
 
+static inline value lookupn(const struct context* c, const char* str, size_t n) {
+    size_t i;
+    if (find_ind(c, str, &i))
+	return c->table[i].val;
+    //try searching through the parent if that didn't work
+    if (c->parent)
+	return lookup(c->parent, str);
+    //reaching this point in execution means the matching entry wasn't found
+    return make_val_undef();
+}
 value lookup(const struct context* c, const char* str) {
     size_t i;
     if (find_ind(c, str, &i))
@@ -2088,7 +2093,7 @@ void set_value(struct context* c, const char* p_name, value p_val, int copy) {
 	snprintf(tmp, BUF_SIZE, "\e_%lu", c->n_memb);
 	return set_value(c, tmp, p_val, copy);
     }
-    size_t ti = fnv_1(p_name, c->t_bits);
+    size_t ti = fnv_1(p_name, SIZE_MAX, c->t_bits);
     if (!find_ind(c, p_name, &ti)) {
 	//if there isn't already an element with that name we have to expand the table and add a member
 	if (grow_context(c))
@@ -2119,7 +2124,7 @@ static inline struct for_state make_for_state(context* c, const char* start, cha
     size_t n;
     //now look for a block labeled "in"
     fs.for_start = for_start;
-    fs.in_start = token_block(for_start+KEY_FOR_LEN, "in");
+    fs.in_start = token_block(for_start+KEY_FOR_LEN, "in", strlen("in"));
     if (!fs.in_start) {
 	*er = make_val_error(E_BAD_SYNTAX, "expected keyword in");
 	return fs;
@@ -2129,7 +2134,8 @@ static inline struct for_state make_for_state(context* c, const char* start, cha
     //the variable name is whatever is in between the "for" and the "in"
     fs.in_start[0] = 0;
     fs.var_name = trim_whitespace(for_start+KEY_FOR_LEN, &n);
-    fs.var_name = strndup(fs.var_name, n+1);
+    fs.var_name = strndup(fs.var_name, n);
+    fs.var_name[n] = 0;
     for_start[KEY_FOR_LEN+1+n] = ' ';//reset the for string from trim_whitespace
     //now parse the list we iterate over
     char* list_expr = strdup(fs.in_start+KEY_IN_LEN);
@@ -2189,7 +2195,7 @@ static inline value parse_list(struct context* c, char* str) {
     //read the coordinates separated by spaces
     value* lbuf;
     //check if this is a list interpretation
-    char* for_start = token_block(start+1, "for");
+    char* for_start = token_block(start+1, "for", strlen("for"));
     if (for_start) {
 	struct for_state fs = make_for_state(c, start, for_start, &sto);
 	if (sto.type == VAL_ERR)
@@ -2259,7 +2265,9 @@ func_call parse_func(struct context* c, char* token, long open_par_ind, value* v
 
     //break the string up at the parenthesis and remove surrounding whitespace
     token[open_par_ind] = 0;
-    f.name = trim_whitespace(token, NULL);
+    size_t n;
+    f.name = trim_whitespace(token, &n);
+    f.name[n] = 0;
 
     //now remove whitespace from the ends of the string
     char* arg_str = token+open_par_ind+1;
@@ -2315,85 +2323,89 @@ func_call parse_func(struct context* c, char* token, long open_par_ind, value* v
  * close_ind: store the location of the last escaping block
  * returns: the index of the first expression or 0 in the event of an error (it is impossible for a valid expression to have an operator as the first character)
  */
-static inline value find_operator(char* str, size_t* op_loc, int* first_open_ind, int* last_close_ind) {
-    *op_loc = 0;
-    *first_open_ind = -1;*last_close_ind = -1;
+static inline value find_operator(read_state rs, lbi* op_loc, lbi* first_open_ind, lbi* last_close_ind) {
+    *op_loc = rs.end;
+    *first_open_ind = rs.end;*last_close_ind = rs.end;
     //keeps track of open and close [], (), {}, and ""
     stack(blk_type) blk_stk = make_stack(blk_type)();
     blk_type start_ind;
     //variable names are not allowed to start with '+', '-', or a digit and may not contain any '.' symbols. Use this to check whether the value is numeric
-    int is_numeric = (str[0] == '+' || str[0] == '-' || str[0] == '.' || (str[0] >= '0' && str[0] <= '9'));
+    char cur = lb_get(rs.b, rs.pos);
+    int is_numeric = (cur == '+' || cur == '-' || cur == '.' || (cur >= '0' && cur <= '9'));
 
     //keep track of the precedence of the orders of operation (lower means executed later) ">,=,>=,==,<=,<"=4 "+,-"=3, "*,/"=2, "**"=1
     char op_prec = 0;
-    for (_uint i = 0; str[i] != 0; ++i) {
-	if (str[i] == '['/*]*/) {
+    for (; lbi_comp(rs.pos, rs.end) == 0; rs.pos = lb_add(rs.b, rs.pos, 1)) {
+	cur = lb_get(rs.b, rs.pos);
+	char next = lb_get(rs.b, lb_add(rs.b, rs.pos, 1));
+	char prev = lb_get(rs.b, lb_sub(rs.b, rs.pos, 1));
+	if (cur == '['/*]*/) {
 	    push(blk_type)(&blk_stk, BLK_SQUARE);
-	    if (*first_open_ind == -1) { *first_open_ind = i; }
-	} else if (str[i] == /*[*/']') {
+	    if (lbi_comp(*first_open_ind, rs.end) == 0) *first_open_ind = rs.pos;
+	} else if (cur == /*[*/']') {
 	    if (pop(blk_type)(&blk_stk, &start_ind) || start_ind != BLK_SQUARE) {
 		destroy_stack(blk_type)(&blk_stk, NULL);
 		return make_val_error(E_BAD_SYNTAX, /*[*/"unexpected ]");
 	    }
-	    *last_close_ind = i;
-	} else if (str[i] == '('/*)*/) {
+	    *last_close_ind = rs.pos;
+	} else if (cur == '('/*)*/) {
 	    //keep track of open and close parenthesis, these will come in handy later
 	    push(blk_type)(&blk_stk, BLK_PAREN);
 	    //only set the open index if this is the first match
-	    if (*first_open_ind == -1) { *first_open_ind = i; }
-	} else if (str[i] == /*(*/')') {
+	    if (lbi_comp(*first_open_ind, rs.end) == 0) *first_open_ind = rs.pos;
+	} else if (cur == /*(*/')') {
 	    if (pop(blk_type)(&blk_stk, &start_ind) || start_ind != BLK_PAREN) {
 		destroy_stack(blk_type)(&blk_stk, NULL);
 		return make_val_error(E_BAD_SYNTAX, /*(*/"unexpected )");
 	    }
-	    *last_close_ind = i;
-	} else if (str[i] == '{'/*}*/) {
+	    *last_close_ind = rs.pos;
+	} else if (cur == '{'/*}*/) {
 	    //keep track of open and close parenthesis, these will come in handy later
 	    push(blk_type)(&blk_stk, BLK_CURLY);
 	    //only set the open index if this is the first match
-	    if (*first_open_ind == -1) { *first_open_ind = i; }
-	} else if (str[i] == /*{*/'}') {
+	    if (lbi_comp(*first_open_ind, rs.end) == 0) *first_open_ind = rs.pos;
+	} else if (cur == /*{*/'}') {
 	    if (pop(blk_type)(&blk_stk, &start_ind) || start_ind != BLK_CURLY) {
 		destroy_stack(blk_type)(&blk_stk, NULL);
 		return make_val_error(E_BAD_SYNTAX, /*{*/"unexpected }");
 	    }
 	    //only set the end paren location if it hasn't been set yet and the stack has no more parenthesis to remove
-	    *last_close_ind = i;
-	} else if (str[i] == '\"' && (i == 0 || str[i-1] != '\\')) {
+	    *last_close_ind = rs.pos;
+	} else if (cur == '\"' && (prev != '\\')) {
 	    int code = peek(blk_type)(&blk_stk, 1, &start_ind);
 	    if (code || start_ind != BLK_QUOTE) {
 		//quotes need to be handled in a special way
 		push(blk_type)(&blk_stk, BLK_QUOTE);
 		//only set the open index if this is the first match
-		if (*first_open_ind == -1) *first_open_ind = i;
+		if (lbi_comp(*first_open_ind, rs.end) == 0) *first_open_ind = rs.pos;
 	    } else {
 		pop(blk_type)(&blk_stk, &start_ind);
-		*last_close_ind = i;
+		*last_close_ind = rs.pos;
 	    }
-	} else if (str[i] == '/') {
+	} else if (cur == '/') {
 	    //ignore everything after a comment
-	    if (str[i+1] == '/')
+	    if (next == '/')
 		break;
 	}
 
 	if (blk_stk.ptr == 0) {
 	    //check if we found a comparison operation symbol
-	    if (((str[i] == '=' && str[i+1] == '=') || str[i] == '>' || str[i] == '<') && op_prec < 5) {
+	    if (((cur == '=' && next == '=') || cur == '>' || cur == '<') && op_prec < 5) {
 		op_prec = 5;
-		*op_loc = i;
-	    } else if (i != 0 && (str[i] == '+' || str[i] == '-') && str[i-1] != 'e' && op_prec < 4) {
+		*op_loc = rs.pos;
+	    } else if ((cur == '+' || cur == '-') && prev != 'e' && op_prec < 4) {
 		//remember to recurse after we finish looping
 		op_prec = 4;
-		*op_loc = i;
-	    } else if (str[i] == '^' && op_prec < 3) {
+		*op_loc = rs.pos;
+	    } else if (cur == '^' && op_prec < 3) {
 		op_prec = 3;
-		*op_loc = i;
-	    } else if ((str[i] == '*' || str[i] == '/') && op_prec < 2) {
+		*op_loc = rs.pos;
+	    } else if ((cur == '*' || cur == '/') && op_prec < 2) {
 		op_prec = 2;
-		*op_loc = i;
-	    } else if (op_prec < 1 && (str[i] == '?' || (str[i] == '.' && !is_numeric))) {
+		*op_loc = rs.pos;
+	    } else if (op_prec < 1 && (cur == '?' || (cur == '.' && !is_numeric))) {
 		op_prec = 1;
-		*op_loc = i;
+		*op_loc = rs.pos;
 	    }
 	}
     }
@@ -2414,7 +2426,7 @@ static inline value find_operator(char* str, size_t* op_loc, int* first_open_ind
     return make_val_undef();
 }
 
-
+// helper for parse_value to handle numeric literals
 // helper for parse_value to handle numeric literals
 static inline value parse_literal_string(char* str, int first_open_ind, int last_close_ind) {
     value sto;
@@ -2524,7 +2536,7 @@ static inline value parse_literal_func(struct context* c, char* str, int first_o
 	    line_buffer* b = make_line_buffer_sep(f_end, ';');
 	    sto.type = VAL_FUNC;
 	    sto.n_els = f.n_args;
-	    line_buffer_ind start, end;
+	    lbi start, end;
 	    start = make_lbi(0, j);
 	    sto.val.f = make_user_func_lb(f, lb_get_enclosed(b, start, &end, '{', '}', 0, 0));
 	    cleanup_func(&f);
@@ -2567,59 +2579,81 @@ static inline value parse_literal_func(struct context* c, char* str, int first_o
     return sto;
 }
 
-value parse_value(struct context* c, char* str) {
+static inline value parse_value_rs(struct context* c, read_state rs) {
     value sto = make_val_undef();
     //iterate until we hit a non whitespace character
-    while (*str && is_whitespace(*str)) ++str;
-    if (str[0] == 0)
+    while (is_whitespace(lb_get(rs.b, rs.pos))) {
+	//if we hit the end of the line without non-whitespace then return an undefined value
+	rs.pos = lb_add(rs.b, rs.pos, 1);
+	if (lbi_comp(rs.pos, rs.end) == 0)
+	    return sto;
+    }
+    if (lbi_comp(rs.pos,rs.end) == 0)
 	return sto;
 
     //store locations of the first instance of different operators. We do this so we can quickly look up new operators if we didn't find any other operators of a lower precedence (such operators are placed in the tree first).
-    int first_open_ind, last_close_ind;
-    //store the location of the operator
-    size_t op_loc;
-    sto = find_operator(str, &op_loc, &first_open_ind, &last_close_ind);
+    lbi first_open_ind, last_close_ind, op_loc;
+    sto = find_operator(rs, &op_loc, &first_open_ind, &last_close_ind);
     if (sto.type == VAL_ERR)
 	return sto;
 
     //last try removing parenthesis 
-    if (op_loc == 0) {
+    if (lbi_comp(op_loc, rs.end) == 0) {
 	size_t reset_ind = 0;
 	//if there isn't a valid parenthetical expression, then we should interpret this as a variable
-	if (first_open_ind < 0 || last_close_ind < 0) {
-	    str = trim_whitespace(str, &reset_ind);
+	if (lbi_comp(first_open_ind, rs.end) == 0 || lbi_comp(last_close_ind, rs.end) == 0) {
+	    char* str = trim_whitespace(rs.b->lines[rs.pos.line]+rs.pos.off, &reset_ind);
 	    //ensure that empty strings return undefined
 	    if (str[0] == 0)
 		return make_val_undef();
-	    sto = lookup(c, str);
+	    sto = lookupn(c, str, reset_ind-1);
 	    if (sto.type == VAL_UNDEF) {
 		//try interpreting as a number
 		errno = 0;
+		str[reset_ind] = 0;
 		sto.val.x = strtod(str, NULL);
 		sto.n_els = 1;
 		if (errno)
 		    return make_val_error(E_UNDEF, "undefined token %s", str);
 		sto.type = VAL_NUM;
+		//all whitespace is treated identically so it doesn't matter
+		str[reset_ind] = ' ';
 	    }
-	    sto = copy_val(sto);
-	    str[reset_ind] = ' ';//all whitespace is treated identically so it doesn't matter
+	    sto = copy_val(sto); 
 	} else {
+	    last_close_ind = lb_add(rs.b, last_close_ind, 1);
+	    char* str = lb_get_line(rs.b, rs.pos, last_close_ind);
+	    size_t open = lb_diff(rs.b, first_open_ind, rs.pos);
+	    size_t close = lb_diff(rs.b, last_close_ind, rs.pos);
 	    //if there are enclosed blocks then we need to read those
-	    switch (str[first_open_ind]) {
-	    case '\"': if (str[last_close_ind] != '\"') return make_val_error(E_BAD_SYNTAX, "expected \"");
-		return parse_literal_string(str, first_open_ind, last_close_ind);break;
-	    case '[': if (str[last_close_ind] != ']') return make_val_error(E_BAD_SYNTAX, /*[*/"expected ]");
-		return parse_literal_list(c, str, first_open_ind, last_close_ind);break;
-	    case '{': if (str[last_close_ind] != '}') return make_val_error(E_BAD_SYNTAX, /*{*/"expected }");
-		return parse_literal_table(c, str, first_open_ind, last_close_ind);break;
-	    case '(': if (str[last_close_ind] != ')') return make_val_error(E_BAD_SYNTAX, /*(*/"expected )");
-		return parse_literal_func(c, str, first_open_ind, last_close_ind);break;
+	    switch (lb_get(rs.b, first_open_ind)) {
+	    case '\"': return parse_literal_string(str, open, close);break; //"
+	    case '[':  return parse_literal_list(c, str, open, close);break; //]
+	    case '{':  return parse_literal_table(c, str, open, close);break; //}
+	    case '(':  return parse_literal_func(c, str, open, close);break; //)
 	    }
+	    free(str);
 	}
     } else {
-	return do_op(c, str, op_loc);
+	return do_op(c, rs, op_loc);
     }
     return sto;
+}
+
+value parse_value(context* c, char* str) {
+    //Setup a dummy line buffer. We're calling alloca with sizes known at compile-time, don't get mad at me.
+    line_buffer lb;
+    lb.lines = alloca(sizeof(char*));
+    lb.line_sizes = alloca(sizeof(size_t));
+    lb.lines[0] = str;
+    lb.line_sizes[0] = strlen(str);
+    lb.n_lines = 1;
+    read_state rs;
+    rs.b = &lb;
+    rs.pos = make_lbi(0,0);
+    rs.end = make_lbi(0, rs.b->line_sizes[0]);
+
+    parse_value_rs(c, rs);
 }
 
 static inline read_state make_read_state(const line_buffer* pb) {
@@ -2643,7 +2677,7 @@ static inline value read_single_line(context* c, read_state* rs) {
     int started = 0;
     char* lval = NULL;
     size_t rval_ind = 0;
-    line_buffer_ind init = rs->pos;
+    lbi init = rs->pos;
     for (rs->pos.off = 0;; ++rs->pos.off) {
 	//make sure the buffer is large enough
 	if (k >= rs->buf_size) {
@@ -2662,7 +2696,7 @@ static inline value read_single_line(context* c, read_state* rs) {
 	    started = 1;
 	if (started) {
 	    //handle comments
-	    if (lb_get(rs->b, rs->pos) == '/' && rs->pos.off > 0 && lb_get(rs->b, lbi_sub(rs->pos, 1)) == '/') {
+	    if (lb_get(rs->b, rs->pos) == '/' && rs->pos.off > 0 && lb_get(rs->b, lb_sub(rs->b, rs->pos, 1)) == '/') {
 		//we don't care about lines that only contain comments, so we should skip over them, but in the other event we need to skip to the end of the line
 		if (k == 1)
 		    started = 0;
@@ -2671,13 +2705,14 @@ static inline value read_single_line(context* c, read_state* rs) {
 		//terminate the expression and move to the next line
 		rs->buf[--k] = 0;
 		break;
-	    } else if (lb_get(rs->b, rs->pos) == '*' && rs->pos.off > 0 && lb_get(rs->b, lbi_sub(rs->pos, 1)) == '/') {
+	    } else if (lb_get(rs->b, rs->pos) == '*' && rs->pos.off > 0 && lb_get(rs->b, lb_sub(rs->b, rs->pos, 1)) == '/') {
 		if (k == 1)
 		    started = 0;
 		rs->buf[--k] = 0;//set the slash to be a null terminator
-		while (lb_inc(rs->b, &rs->pos)) {
-		    if (lb_get(rs->b, rs->pos) == '*' && lb_get(rs->b, lbi_add(rs->pos, 1)) == '/') {
-			rs->pos = lbi_add(rs->pos,2);
+		rs->pos = lb_add(rs->b, rs->pos, 1);
+		while (rs->pos.line < rs->b->n_lines) {
+		    if (lb_get(rs->b, rs->pos) == '*' && lb_get(rs->b, lb_add(rs->b, rs->pos, 1)) == '/') {
+			rs->pos = lb_add(rs->b, rs->pos, 2);
 			break;
 		    }
 		}
@@ -2702,7 +2737,7 @@ static inline value read_single_line(context* c, read_state* rs) {
 		default: break;
 	    }
 	    if (match_tok) {
-		line_buffer_ind end;
+		lbi end;
 		line_buffer* enc = lb_get_enclosed(rs->b, rs->pos, &end, lb_get(rs->b, rs->pos), match_tok, 1, 1);
 		size_t tmp_len;
 		char* tmp = lb_flatten(enc, ' ', &tmp_len);
@@ -2750,9 +2785,9 @@ value read_from_lines(struct context* c, const line_buffer* b) {
     //iterate over each line in the file
     while (1) {
 	if(line) free(line);
-	line = lb_get_line(b, rs.pos);
+	line = lb_get_line(b, rs.pos, rs.pos);
 	//check for class and function declarations
-	char* dectype_start = token_block(line, "def");
+	char* dectype_start = token_block(line, "def", strlen("def"));
 	if (dectype_start) {
 	    char* endptr;
 	    func_call cur_func = parse_func(c, dectype_start + KEY_DEF_LEN, -1, &er, &endptr, 1);
@@ -2762,7 +2797,7 @@ value read_from_lines(struct context* c, const line_buffer* b) {
 		for (; endptr[i] && (endptr[i] == ' ' || endptr[i] == '\t' || endptr[i] == '\n'); ++i) (void)0;
 		//now we actually create the function
 		rs.pos.off = 0;
-		line_buffer_ind end;
+		lbi end;
 		line_buffer* fun_buf = lb_get_enclosed(b, rs.pos, &end, '{', '}', 0, 0);
 		user_func* tmp = make_user_func_lb(cur_func, fun_buf);
 		free(fun_buf);
@@ -2786,7 +2821,8 @@ value read_from_lines(struct context* c, const line_buffer* b) {
 	}
 	//if we're at the end of a line, try incrementing. If that doesn't work, then we've reached the end of the file.
 	if (rs.pos.off >= lb_get_line_size(rs.b, rs.pos.line)) {
-	    if (!lb_inc(b, &rs.pos))
+	    rs.pos = lb_add(b, rs.pos, 1);
+	    if (rs.pos.line == rs.b->n_lines)
 		break;
 	}
     }
