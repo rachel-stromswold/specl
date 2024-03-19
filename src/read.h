@@ -65,6 +65,23 @@ inline void* xrealloc(void* p, size_t nsize) {
 //generic stack class
 #define TYPED_A(NAME,TYPE) NAME##TYPE
 #define TYPED(NAME,TYPE) TYPED_A(NAME, _##TYPE)
+#define WRAP_MATH_FN(FN) value TYPED(fun,FN)(struct context* c, cgs_func f) {		\
+    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);	\
+    if (sto.type == 0)									\
+	return make_val_num( FN(f.args[0].val.val.x) );					\
+    cleanup_val(&sto);									\
+    sto = check_signature(f, SIGLEN(MATHA_SIG), SIGLEN(MATHA_SIG), MATHA_SIG, 0);	\
+    if (sto.type == 0) {								\
+	sto.type = VAL_ARRAY;								\
+	sto.n_els = f.args[0].val.n_els;						\
+	sto.val.a = malloc(sizeof(double)*sto.n_els);					\
+	if (!sto.val.a)									\
+	    return make_val_error(E_NOMEM, "");						\
+	for (size_t i = 0; i < f.args[0].val.n_els; ++i)				\
+	    sto.val.a[i] = FN(f.args[0].val.val.a[i]);					\
+    }											\
+    return sto;										\
+}
 #define TYPED3(NAME,TA,TB) TYPED(TYPED_A(NAME,_##TA),TB)
 #define PAIR_DEF(TA,TB) struct TYPED3(PAIR,TA,TB) {					\
     TA a;										\
@@ -460,6 +477,15 @@ void setup_builtins(struct context* c);
  */
 value lookup(const struct context* c, const char* name);
 /**
+ * Lookup the object named str in c and save the resulting context to sto
+ * c: the context to search
+ * str: the name to lookup
+ * type: force the object to match the specified typename
+ * sto: overwrite this information to save
+ * returns: 0 on success or a negative value if an error occurred (-1 indicates no match, -2 indicates match of the wrong type)
+ */
+int lookup_object(const context* c, const char* str, const char* type, context** sto);
+/**
  * Lookup the value named str in c and write the first n elements of the resulting list/array to sto
  * c: the context to search
  * str: the name to lookup
@@ -478,17 +504,20 @@ int lookup_c_array(const context* c, const char* str, double* sto, size_t n);
  */
 int lookup_c_str(const context* c, const char* str, char* sto, size_t n);
 /**
- * lookup the integer value in c at str and return the result. on error 0 is returned and er is set to 1
+ * lookup the integer value in c at str and save to sto.
+ * returns: 0 on success or -1 if the name str couldn't be found
  */
-int lookup_int(const context* c, const char* str, int* er);
+int lookup_int(const context* c, const char* str, int* sto);
 /**
- * lookup the integer value in c at str and return the result. on error 0 is returned and er is set to 1
+ * lookup the unsigned integer value in c at str and save to sto.
+ * returns: 0 on success or -1 if the name str couldn't be found
  */
-size_t lookup_uint(const context* c, const char* str, int* er);
+int lookup_size(const context* c, const char* str, size_t* sto);
 /**
- * lookup the floating point value in c at str and return the result. on error 0 is returned and er is set to 1
+ * lookup the floating point value in c at str and save to sto.
+ * returns: 0 on success or -1 if the name str couldn't be found
  */
-double lookup_float(const context* c, const char* str, int* er);
+int lookup_float(const context* c, const char* str, double* sto);
 /**
  * Set the value with a name matching p_name to a copy of p_val
  * name: the name of the variable to set

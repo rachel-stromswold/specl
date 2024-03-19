@@ -809,14 +809,14 @@ value check_signature(cgs_func f, size_t min_args, size_t max_args, const valtyp
     }
     return make_val_undef();
 }
-value get_type(struct context* c, cgs_func tmp_f) {
+value get_type(struct context* c, cgs_func f) {
     value sto;
     sto.type = VAL_STR;
-    if (tmp_f.n_args < 1)
+    if (f.n_args < 1)
 	return make_val_error(E_LACK_TOKENS, "typeof() called without arguments");
     //handle instances as a special case
-    if (tmp_f.args[0].val.type == VAL_INST) {
-	value t = lookup(tmp_f.args[0].val.val.c, "__type__");
+    if (f.args[0].val.type == VAL_INST) {
+	value t = lookup(f.args[0].val.val.c, "__type__");
 	if (t.type == VAL_STR) {
 	    sto.n_els = t.n_els;
 	    sto.val.s = malloc(sizeof(char)*(sto.n_els+1));
@@ -828,28 +828,28 @@ value get_type(struct context* c, cgs_func tmp_f) {
 	}
 	return sto;
     }
-    sto.n_els = strlen(valnames[tmp_f.args[0].val.type])+1;
-    sto.val.s = strdup(valnames[tmp_f.args[0].val.type]);
+    sto.n_els = strlen(valnames[f.args[0].val.type])+1;
+    sto.val.s = strdup(valnames[f.args[0].val.type]);
     return sto;
 }
-value make_range(struct context* c, cgs_func tmp_f) {
+value make_range(struct context* c, cgs_func f) {
     static const valtype RANGE_SIG[] = {VAL_NUM, VAL_NUM, VAL_NUM};
-    value sto = check_signature(tmp_f, 1, SIGLEN(RANGE_SIG), RANGE_SIG, 0);
+    value sto = check_signature(f, 1, SIGLEN(RANGE_SIG), RANGE_SIG, 0);
     if (sto.type)
 	return sto;
     double min, max, inc;
     //interpret arguments depending on how many were provided
-    if (tmp_f.n_args == 1) {
+    if (f.n_args == 1) {
 	min = 0;
-	max = tmp_f.args[0].val.val.x;
+	max = f.args[0].val.val.x;
 	inc = 1;
     } else {
-	min = tmp_f.args[0].val.val.x;
-	max = tmp_f.args[1].val.val.x;
+	min = f.args[0].val.val.x;
+	max = f.args[1].val.val.x;
 	inc = 1;
     }
-    if (tmp_f.n_args >= 3)
-	inc = tmp_f.args[2].val.val.x;
+    if (f.n_args >= 3)
+	inc = f.args[2].val.val.x;
     //make sure arguments are valid
     if ((max-min)*inc <= 0)
 	return make_val_error(E_BAD_VALUE, "range(%f, %f, %f) with invalid increment", min, max, inc);
@@ -860,28 +860,28 @@ value make_range(struct context* c, cgs_func tmp_f) {
 	sto.val.a[i] = i*inc + min;
     return sto;
 }
-value make_linspace(struct context* c, cgs_func tmp_f) {
+value make_linspace(struct context* c, cgs_func f) {
     static const valtype LINSPACE_SIG[] = {VAL_NUM, VAL_NUM, VAL_NUM};
-    value sto = check_signature(tmp_f, SIGLEN(LINSPACE_SIG), SIGLEN(LINSPACE_SIG), LINSPACE_SIG, 0);
+    value sto = check_signature(f, SIGLEN(LINSPACE_SIG), SIGLEN(LINSPACE_SIG), LINSPACE_SIG, 0);
     if (sto.type)
 	return sto;
     sto.type = VAL_ARRAY;
-    sto.n_els = (size_t)(tmp_f.args[2].val.val.x);
+    sto.n_els = (size_t)(f.args[2].val.val.x);
     //prevent divisions by zero
     if (sto.n_els < 2)
 	return make_val_error(E_BAD_VALUE, "cannot make linspace with size %lu", sto.n_els);
     sto.val.a = (double*)malloc(sizeof(double)*sto.n_els);
-    double step = (tmp_f.args[1].val.val.x - tmp_f.args[0].val.val.x)/(sto.n_els - 1);
+    double step = (f.args[1].val.val.x - f.args[0].val.val.x)/(sto.n_els - 1);
     for (size_t i = 0; i < sto.n_els; ++i) {
-	sto.val.a[i] = step*i + tmp_f.args[0].val.val.x;
+	sto.val.a[i] = step*i + f.args[0].val.val.x;
     }
     return sto;
 }
 STACK_DEF(value)
-value flatten_list(struct context* c, cgs_func tmp_f) {
+value flatten_list(struct context* c, cgs_func f) {
     static const valtype FLATTEN_LIST_SIG[] = {VAL_LIST};
-    value sto = check_signature(tmp_f, SIGLEN(FLATTEN_LIST_SIG), SIGLEN(FLATTEN_LIST_SIG), FLATTEN_LIST_SIG, 0);
-    value cur_list = tmp_f.args[0].val;
+    value sto = check_signature(f, SIGLEN(FLATTEN_LIST_SIG), SIGLEN(FLATTEN_LIST_SIG), FLATTEN_LIST_SIG, 0);
+    value cur_list = f.args[0].val;
     //flattening an empty list is the identity op.
     if (cur_list.n_els == 0 || cur_list.val.l == NULL) {
 	sto.type = VAL_LIST;
@@ -917,7 +917,7 @@ value flatten_list(struct context* c, cgs_func tmp_f) {
 		value* tmp_val = (value*)realloc(sto.val.l, sizeof(value)*buf_size);
 		if (!tmp_val) {
 		    free(sto.val.l);
-		    cleanup_func(&tmp_f);
+		    cleanup_func(&f);
 		    destroy_stack(value)(&lists, &cleanup_val);
 		    destroy_stack(size_t)(&inds, NULL);
 		    return make_val_error(E_NOMEM, "");
@@ -940,12 +940,12 @@ exit:
     destroy_stack(size_t)(&inds, NULL);
     return sto;
 }
-value concatenate(struct context* c, cgs_func tmp_f) {
+value concatenate(struct context* c, cgs_func f) {
     value sto;
-    if (tmp_f.n_args < 2)
-	return make_val_error(E_LACK_TOKENS, "cat() expected 2 arguments but got %lu", tmp_f.n_args);
-    value l = tmp_f.args[0].val;
-    value r = tmp_f.args[1].val;
+    if (f.n_args < 2)
+	return make_val_error(E_LACK_TOKENS, "cat() expected 2 arguments but got %lu", f.n_args);
+    value l = f.args[0].val;
+    value r = f.args[1].val;
     size_t l1 = l.n_els;
     size_t l2 = (r.type == VAL_LIST || r.type == VAL_ARRAY)? r.n_els : 1;
     //special case for matrices, just append a new row
@@ -985,7 +985,7 @@ value concatenate(struct context* c, cgs_func tmp_f) {
 	sto.val.a = (double*)malloc(sizeof(double)*sto.n_els);
 	if (!sto.val.a) return make_val_error(E_NOMEM, "");
 	for (size_t i = 0; i < l1; ++i)
-	    sto.val.l[i] = copy_val(tmp_f.args[0].val.val.l[i]);
+	    sto.val.l[i] = copy_val(f.args[0].val.val.l[i]);
 	if (r.type == VAL_LIST) {
 	    //list -> array
 	    for (size_t i = 0; i < l2; ++i) {
@@ -1011,15 +1011,15 @@ value concatenate(struct context* c, cgs_func tmp_f) {
 /**
  * print the elements to the console
  */
-value print(struct context* c, cgs_func tmp_f) {
-    value ret;ret.type = VAL_UNDEF;ret.val.x = 0;ret.n_els = 0;
-    for (size_t i = 0; i < tmp_f.n_args; ++i) {
-	if (tmp_f.args[i].val.type == VAL_NUM) {
-	    printf("%f", tmp_f.args[i].val.val.x);
-	} else if (tmp_f.args[i].val.type == VAL_STR) {
-	    printf("%s", tmp_f.args[i].val.val.s);
+value print(struct context* c, cgs_func f) {
+    value ret = make_val_undef();
+    for (size_t i = 0; i < f.n_args; ++i) {
+	if (f.args[i].val.type == VAL_NUM) {
+	    printf("%f", f.args[i].val.val.x);
+	} else if (f.args[i].val.type == VAL_STR) {
+	    printf("%s", f.args[i].val.val.s);
 	} else {
-	    printf("<object at %p>", tmp_f.args[i].val.val.l);
+	    printf("<object at %p>", f.args[i].val.val.l);
 	}
     }
     printf("\n");
@@ -1028,29 +1028,29 @@ value print(struct context* c, cgs_func tmp_f) {
 /**
  * Make a vector argument with the x,y, and z coordinates supplied
  */
-value make_array(context* c, cgs_func tmp_f) {
+value make_array(context* c, cgs_func f) {
     static const valtype ARRAY_SIG[] = {VAL_LIST};
-    value sto = check_signature(tmp_f, SIGLEN(ARRAY_SIG), SIGLEN(ARRAY_SIG), ARRAY_SIG, 0);
+    value sto = check_signature(f, SIGLEN(ARRAY_SIG), SIGLEN(ARRAY_SIG), ARRAY_SIG, 0);
     if (sto.type)
 	return sto;
 
     //treat matrices with one row as vectors
-    if (tmp_f.n_args == 1) {
-	if (tmp_f.args[0].val.val.l[0].type == VAL_LIST)
-	    return cast_to(tmp_f.args[0].val, VAL_MAT);
+    if (f.n_args == 1) {
+	if (f.args[0].val.val.l[0].type == VAL_LIST)
+	    return cast_to(f.args[0].val, VAL_MAT);
 	else
-	    return cast_to(tmp_f.args[0].val, VAL_ARRAY);
+	    return cast_to(f.args[0].val, VAL_ARRAY);
     }
     //otherwise we need to do more work
-    size_t n_cols = tmp_f.args[0].val.n_els;
+    size_t n_cols = f.args[0].val.n_els;
     sto.type = VAL_MAT;
-    sto.n_els = tmp_f.n_args;
-    sto.val.l = (value*)malloc(sizeof(value)*tmp_f.n_args);
+    sto.n_els = f.n_args;
+    sto.val.l = (value*)malloc(sizeof(value)*f.n_args);
     //iterate through rows
-    for (size_t i = 0; i < tmp_f.n_args; ++i) {
-	if (tmp_f.args[i].val.type == VAL_LIST) { free(sto.val.l);return make_val_error(E_BAD_TYPE, "non list encountered in matrix"); }
-	if (tmp_f.args[i].val.n_els != n_cols) { free(sto.val.l);return make_val_error(E_BAD_VALUE, "can't create matrix from ragged array"); }
-	sto.val.l[i] = cast_to(tmp_f.args[i].val, VAL_ARRAY);
+    for (size_t i = 0; i < f.n_args; ++i) {
+	if (f.args[i].val.type == VAL_LIST) { free(sto.val.l);return make_val_error(E_BAD_TYPE, "non list encountered in matrix"); }
+	if (f.args[i].val.n_els != n_cols) { free(sto.val.l);return make_val_error(E_BAD_VALUE, "can't create matrix from ragged array"); }
+	sto.val.l[i] = cast_to(f.args[i].val, VAL_ARRAY);
 	//check for errors
 	if (sto.val.l[i].type == VAL_ERR) {
 	    sto = copy_val(sto.val.l[i]);
@@ -1061,52 +1061,94 @@ value make_array(context* c, cgs_func tmp_f) {
     return sto;
 }
 
-value make_vec(context* c, cgs_func tmp_f) {
+value make_vec(context* c, cgs_func f) {
     value sto = make_val_undef();
     //just copy the elements
     sto.type = VAL_ARRAY;
-    sto.n_els = tmp_f.n_args;
+    sto.n_els = f.n_args;
     //skip copying an empty list
     if (sto.n_els == 0)
 	return sto;
     sto.val.a = (double*)malloc(sizeof(double)*sto.n_els);
-    for (size_t i = 0; i < tmp_f.n_args; ++i) {
-	if (tmp_f.args[i].val.type != VAL_NUM) {
+    for (size_t i = 0; i < f.n_args; ++i) {
+	if (f.args[i].val.type != VAL_NUM) {
 	    free(sto.val.a);
 	    return make_val_error(E_BAD_TYPE, "cannot cast list with non-numeric types to array");
 	}
-	sto.val.a[i] = tmp_f.args[i].val.val.x;
+	sto.val.a[i] = f.args[i].val.val.x;
     }
     return sto;
 }
 
 //math functions
-static const valtype MATH1_SIG[] = {VAL_NUM};
-value fun_sin(struct context* c, cgs_func f) {
-    value sto = check_signature(f, SIGLEN(MATH1_SIG), SIGLEN(MATH1_SIG), MATH1_SIG, 0);
-    if (sto.type) return sto;
-    return make_val_num( sin(f.args[0].val.val.x) );
+static const valtype MATHN_SIG[] = {VAL_NUM};
+static const valtype MATHA_SIG[] = {VAL_ARRAY};
+WRAP_MATH_FN(sin)
+WRAP_MATH_FN(cos)
+WRAP_MATH_FN(tan)
+WRAP_MATH_FN(exp)
+WRAP_MATH_FN(asin)
+WRAP_MATH_FN(acos)
+WRAP_MATH_FN(atan)
+WRAP_MATH_FN(log)
+WRAP_MATH_FN(sqrt)
+/*value fun_sin(struct context* c, cgs_func f) {
+    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
+    if (sto.type == 0)
+	return make_val_num( sin(f.args[0].val.val.x) );
+    value sto = check_signature(f, SIGLEN(MATHA_SIG), SIGLEN(MATHA_SIG), MATHA_SIG, 0);
+    if (sto.type == 0)
+	return make_val_num( sin(f.args[0].val.val.x) );
+    return sto;
 }
 value fun_cos(struct context* c, cgs_func f) {
-    value sto = check_signature(f, SIGLEN(MATH1_SIG), SIGLEN(MATH1_SIG), MATH1_SIG, 0);
-    if (sto.type) return sto;
-    return make_val_num( cos(f.args[0].val.val.x) );
+    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
+    if (sto.type == 0)
+	return make_val_num( cos(f.args[0].val.val.x) );
+    return sto;
 }
 value fun_tan(struct context* c, cgs_func f) {
-    value sto = check_signature(f, SIGLEN(MATH1_SIG), SIGLEN(MATH1_SIG), MATH1_SIG, 0);
-    if (sto.type) return sto;
-    return make_val_num( tan(f.args[0].val.val.x) );
+    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
+    if (sto.type == 0)
+	return make_val_num( tan(f.args[0].val.val.x) );
+    return sto;
 }
 value fun_exp(struct context* c, cgs_func f) {
-    value sto = check_signature(f, SIGLEN(MATH1_SIG), SIGLEN(MATH1_SIG), MATH1_SIG, 0);
-    if (sto.type) return sto;
-    return make_val_num( exp(f.args[0].val.val.x) );
+    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
+    if (sto.type == 0)
+	return make_val_num( exp(f.args[0].val.val.x) );
+    return sto;
+}
+value fun_arcsin(struct context* c, cgs_func f) {
+    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
+    if (sto.type == 0)
+	return make_val_num( asin(f.args[0].val.val.x) );
+    return sto;
+}
+value fun_arccos(struct context* c, cgs_func f) {
+    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
+    if (sto.type == 0)
+	return make_val_num( acos(f.args[0].val.val.x) );
+    return sto;
+}
+value fun_arctan(struct context* c, cgs_func f) {
+    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
+    if (sto.type == 0)
+	return make_val_num( atan(f.args[0].val.val.x) );
+    return sto;
+}
+value fun_log(struct context* c, cgs_func f) {
+    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
+    if (sto.type == 0)
+	return make_val_num( log(f.args[0].val.val.x) );
+    return sto;
 }
 value fun_sqrt(struct context* c, cgs_func f) {
-    value sto = check_signature(f, SIGLEN(MATH1_SIG), SIGLEN(MATH1_SIG), MATH1_SIG, 0);
-    if (sto.type) return sto;
-    return make_val_num( sqrt(f.args[0].val.val.x) );
-}
+    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
+    if (sto.type == 0)
+	return make_val_num( sqrt(f.args[0].val.val.x) );
+    return sto;
+}*/
 
 /** ============================ struct value ============================ **/
 
@@ -1432,6 +1474,7 @@ void cleanup_val(value* v) {
     }
     v->type = VAL_UNDEF;
     v->val.x = 0;
+    v->n_els = 0;
 }
 
 value copy_val(const value o) {
@@ -1502,7 +1545,7 @@ static inline int matrix_err(value* l, size_t i) {
 
 void val_add(value* l, value r) {
     if (l->type == VAL_NUM && r.type == VAL_NUM) {
-	l->val.x += r.val.x;
+	*l = make_val_num( (l->val.x)+(r.val.x) );
     } else if (l->type == VAL_ARRAY && r.type == VAL_ARRAY) {
 	//add the two arrays together
 	if (l->n_els != r.n_els) {
@@ -1553,8 +1596,7 @@ void val_add(value* l, value r) {
 
 void val_sub(value* l, value r) {
     if (l->type == VAL_NUM && r.type == VAL_NUM) {
-	//subtract numbers
-	l->val.x -= r.val.x;
+	*l = make_val_num( (l->val.x)-(r.val.x) );
     } else if (l->type == VAL_ARRAY && r.type == VAL_ARRAY) {
 	//add the two arrays together
 	if (l->n_els != r.n_els) {
@@ -1587,8 +1629,7 @@ void val_sub(value* l, value r) {
 
 void val_mul(value* l, value r) {
     if (l->type == VAL_NUM && r.type == VAL_NUM) {
-	//subtract numbers
-	l->val.x *= r.val.x;
+	*l = make_val_num( (l->val.x)*(r.val.x) );
     } else if (l->type == VAL_ARRAY && r.type == VAL_ARRAY) {
 	//add the two arrays together
 	if (l->n_els != r.n_els) {
@@ -1630,8 +1671,7 @@ void val_mul(value* l, value r) {
 
 void val_div(value* l, value r) {
     if (l->type == VAL_NUM && r.type == VAL_NUM) {
-	//subtract numbers
-	l->val.x /= r.val.x;
+	*l = make_val_num( (l->val.x)/(r.val.x) );
     } else if (l->type == VAL_ARRAY && r.type == VAL_ARRAY) {
 	//add the two arrays together
 	if (l->n_els != r.n_els) {
@@ -1673,8 +1713,7 @@ void val_div(value* l, value r) {
 
 void val_exp(value* l, value r) {
     if (l->type == VAL_NUM && r.type == VAL_NUM) {
-	//subtract numbers
-	l->val.x = pow(l->val.x, r.val.x);
+	*l = make_val_num( pow(l->val.x, r.val.x) );
     } else if (l->type == VAL_ARRAY && r.type == VAL_ARRAY) {
 	//add the two arrays together
 	if (l->n_els != r.n_els) {
@@ -2015,16 +2054,25 @@ void setup_builtins(struct context* c) {
     set_value(c, "range", 	make_val_func("range", 1, &make_range), 0);
     set_value(c, "linspace", 	make_val_func("linspace", 3, &make_linspace), 0);
     set_value(c, "flatten", 	make_val_func("flatten", 1, &flatten_list), 0);
-    //math stuff
     set_value(c, "array", 	make_val_func("array", 1, &make_array), 0);
     set_value(c, "vec", 	make_val_func("vec", 1, &make_vec), 0);
     set_value(c, "cat", 	make_val_func("cat", 1, &concatenate), 0);
     set_value(c, "print", 	make_val_func("print", 1, &print), 0);
-    set_value(c, "sin", 	make_val_func("sin", 1, &fun_sin), 0);
-    set_value(c, "cos", 	make_val_func("cos", 1, &fun_cos), 0);
-    set_value(c, "tan", 	make_val_func("tan", 1, &fun_tan), 0);
-    set_value(c, "exp", 	make_val_func("exp", 1, &fun_exp), 0);
-    set_value(c, "sqrt", 	make_val_func("sqrt", 1, &fun_sqrt), 0);
+    //math stuff
+    value tmp = make_val_inst(c, "math");
+    context* math_c = tmp.val.c;
+    set_value(math_c, "pi", 	make_val_num(M_PI), 0);
+    set_value(math_c, "e", 	make_val_num(M_E), 0);
+    set_value(math_c, "sin", 	make_val_func("sin", 1, &fun_sin), 0);
+    set_value(math_c, "cos", 	make_val_func("cos", 1, &fun_cos), 0);
+    set_value(math_c, "tan", 	make_val_func("tan", 1, &fun_tan), 0);
+    set_value(math_c, "exp", 	make_val_func("exp", 1, &fun_exp), 0);
+    set_value(math_c, "arcsin", make_val_func("arcsin", 1, &fun_asin), 0);
+    set_value(math_c, "arccos", make_val_func("arccos", 1, &fun_acos), 0);
+    set_value(math_c, "arctan", make_val_func("arctan", 1, &fun_atan), 0);
+    set_value(math_c, "log", 	make_val_func("log", 1, &fun_log), 0);
+    set_value(math_c, "sqrt", 	make_val_func("sqrt", 1, &fun_sqrt), 0);
+    set_value(c, "math", tmp, 0);
 }
 
 value lookup(const struct context* c, const char* str) {
@@ -2035,14 +2083,22 @@ value lookup(const struct context* c, const char* str) {
     if (c->parent)
 	return lookup(c->parent, str);
     //reaching this point in execution means the matching entry wasn't found
-    value ret;
-    ret.type = VAL_UNDEF;
-    ret.val.x = 0;
-    return ret;
+    return make_val_undef();
+}
+
+int lookup_object(const context* c, const char* str, const char* typename, context** sto) {
+    value vobj = lookup(c, str);
+    if (vobj.type != VAL_INST)
+	return -1;
+    value tmp = lookup(vobj.val.c, "__type__");
+    if (tmp.type != VAL_STR || strcmp(tmp.val.s, typename))
+	return -2;
+    if (sto) *sto = vobj.val.c;
+    return 0;
 }
 
 int lookup_c_array(const context* c, const char* str, double* sto, size_t n) {
-    if (n == 0)
+    if (sto == NULL || n == 0)
 	return 0;
     value tmp = lookup(c, str);
     if (!tmp.type)
@@ -2064,7 +2120,7 @@ int lookup_c_array(const context* c, const char* str, double* sto, size_t n) {
 }
 
 int lookup_c_str(const context* c, const char* str, char* sto, size_t n) {
-    if (n == 0)
+    if (sto == NULL || n == 0)
 	return 0;
     value tmp = lookup(c, str);
     if (tmp.type != VAL_STR)
@@ -2075,28 +2131,25 @@ int lookup_c_str(const context* c, const char* str, char* sto, size_t n) {
     return 0;
 }
 
-int lookup_int(const context* c, const char* str, int* er) {
-    if (er) *er = 0;
+int lookup_int(const context* c, const char* str, int* sto) {
     value tmp = lookup(c, str);
     if (tmp.type == VAL_NUM)
-	return (int)tmp.val.x;
-    if (er) *er = 1;
+	return -1;
+    if (sto) *sto = (int)tmp.val.x;
     return 0;
 }
-size_t lookup_uint(const context* c, const char* str, int* er) {
-    if (er) *er = 0;
+int lookup_size(const context* c, const char* str, size_t* sto) {
     value tmp = lookup(c, str);
     if (tmp.type == VAL_NUM)
-	return (size_t)tmp.val.x;
-    if (er) *er = 1;
+	return -1;
+    if (sto) *sto = (size_t)tmp.val.x;
     return 0;
 }
-double lookup_float(const context* c, const char* str, int* er) {
-    if (er) *er = 0;
+int lookup_float(const context* c, const char* str, double* sto) {
     value tmp = lookup(c, str);
     if (tmp.type == VAL_NUM)
-	return tmp.val.x;
-    if (er) *er = 1;
+	return -1;
+    if (sto) *sto = tmp.val.x;
     return 0;
 }
 
@@ -2531,47 +2584,47 @@ static inline value parse_literal_func(struct context* c, char* str, int first_o
     for (size_t j = 0; j < first_open_ind && str[j]; ++j) {
 	if (is_whitespace(str[j]))
 	    continue;
-	cgs_func tmp_f;
+	cgs_func f;
 	//check to see if this is a function declaration, this must be handled differently
 	if (strncmp(str+j, "fun", KEY_DEF_LEN) == 0 &&
 	(is_whitespace(str[j+KEY_DEF_LEN]) || str[j+KEY_DEF_LEN] == '('/*)*/)) {
 	    char* f_end;
-	    tmp_f = parse_func(c, str, first_open_ind, &sto, &f_end, 1);
+	    f = parse_func(c, str, first_open_ind, &sto, &f_end, 1);
 	    if (sto.type == VAL_ERR)
 		return sto;
 	    //find the contents in the curly brace and separate by semicolons
 	    line_buffer* b = make_line_buffer_sep(f_end, ';');
 	    sto.type = VAL_FUNC;
-	    sto.n_els = tmp_f.n_args;
+	    sto.n_els = f.n_args;
 	    line_buffer_ind start, end;
 	    start = make_lbi(0, j);
-	    sto.val.f = make_user_func_lb(tmp_f, lb_get_enclosed(b, start, &end, '{', '}', 0, 0));
-	    cleanup_func(&tmp_f);
+	    sto.val.f = make_user_func_lb(f, lb_get_enclosed(b, start, &end, '{', '}', 0, 0));
+	    cleanup_func(&f);
 	    destroy_line_buffer(b);
 	    return sto;
 	} else {
 	    //we can't leave this as zero in case the user needs to do some more operations
 	    str[last_close_ind+1] = 0;
-	    tmp_f = parse_func(c, str, first_open_ind, &sto, NULL, 0);
+	    f = parse_func(c, str, first_open_ind, &sto, NULL, 0);
 	    if (sto.type == VAL_ERR)
 		return sto;
 	    //otherwise lookup the function
-	    value func_val = lookup(c, tmp_f.name);
+	    value func_val = lookup(c, f.name);
 	    if (func_val.type == VAL_FUNC) {
 		//make sure that the function was found and that sufficient arguments were provided
-		if (func_val.n_els <= tmp_f.n_args) {
-		    sto = uf_eval(func_val.val.f, c, tmp_f);
+		if (func_val.n_els <= f.n_args) {
+		    sto = uf_eval(func_val.val.f, c, f);
 		} else {
 		    str[first_open_ind] = 0;
-		    sto = make_val_error(E_LACK_TOKENS, "Error: unrecognized function name %s\n", tmp_f.name);
+		    sto = make_val_error(E_LACK_TOKENS, "Error: unrecognized function name %s\n", f.name);
 		    str[first_open_ind] = '(';//)
 		}
 	    } else {
 		str[first_open_ind] = 0;
-		sto = make_val_error(E_BAD_TYPE, "Error: unrecognized function name %s\n", tmp_f.name);
+		sto = make_val_error(E_BAD_TYPE, "Error: unrecognized function name %s\n", f.name);
 		str[first_open_ind] = '(';//);
 	    }
-	    cleanup_func(&tmp_f);
+	    cleanup_func(&f);
 	    return sto;
 	}
     }
@@ -2607,14 +2660,15 @@ value parse_value(struct context* c, char* str) {
 	//if there isn't a valid parenthetical expression, then we should interpret this as a variable
 	if (first_open_ind < 0 || last_close_ind < 0) {
 	    str = trim_whitespace(str, &reset_ind);
-	    sto = lookup(c, str);
 	    //ensure that empty strings return undefined
 	    if (str[0] == 0)
 		return make_val_undef();
+	    sto = lookup(c, str);
 	    if (sto.type == VAL_UNDEF) {
 		//try interpreting as a number
 		errno = 0;
 		sto.val.x = strtod(str, NULL);
+		sto.n_els = 1;
 		if (errno)
 		    return make_val_error(E_UNDEF, "undefined token %s", str);
 		sto.type = VAL_NUM;

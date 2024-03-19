@@ -5,572 +5,10 @@ extern "C" {
 #include "read.h"
 }
 
-/*STACK_DEF(size_t)
-STACK_DEF(char*)
-TEST_CASE("stacks") {
-    const size_t PUSH_N = 8;
-    const size_t BSIZE = 64;
-    stack(size_t) i_stack = make_stack(size_t)();
-    stack(char*) s_stack = make_stack(char*)();
-    for (size_t i = 0; i < PUSH_N; ++i)
-	CHECK(push(size_t)(&i_stack, i) == 0);
-    size_t tmp;
-    char buf[BSIZE];
-    for (size_t j = 0; ; ++j) {
-	if (pop(size_t)(&i_stack, &tmp)) break;
-	snprintf(buf, BSIZE, "at %lu: %lu", j, tmp);
-	push(char*)(&s_stack, strdup(buf));
-    }
-    char* str;
-    for (size_t j = 0; j < PUSH_N; ++j) {
-	REQUIRE(pop(char*)(&s_stack, &str) == 0);
-	snprintf(buf, BSIZE, "at %lu: %lu", j, PUSH_N-j-1);
-	CHECK(strcmp(buf, str) == 0);
-	free(str);
-    }
-    destroy_stack(size_t)(&i_stack, NULL);
-    destroy_stack(char*)(&s_stack, NULL);
-}*/
-
-TEST_CASE("function parsing") {
-    char buf[BUF_SIZE];
-
-    const char* test_func_1 = "f()";
-    const char* test_func_2 = "f(\"a\", \"b\", \"c\", 4)";
-    const char* test_func_3 = "foo(vec(1,2,3),\"a\",\"banana\")";
-    const char* test_func_4 = "foo(1, \"box(0,1,2,3)\", 4+5)";
-    const char* test_func_5 = "foo ( 1 , \"b , c\" )";
-    const char* test_func_6 = "f(eps = 3.5)";
-    const char* test_func_7 = "f(name = \"bar\")";
-    const char* test_func_8 = "f(a, b1, c2)";
-    const char* bad_test_func_1 = "foo ( a , b , c";
-    const char* bad_test_func_2 = "foo ( \"a\" , \"b\" , \"c\"";
-
-    context* sc = make_context(NULL);
-    value er = make_val_undef();
-    //check string 1
-    strncpy(buf, test_func_1, BUF_SIZE);buf[BUF_SIZE-1] = 0;
-    cgs_func cur_func = parse_func(sc, buf, 1, &er, NULL, 0);
-    CHECK(er.type != VAL_ERR);
-    CHECK(cur_func.n_args == 0);
-    CHECK(strcmp(cur_func.name, "f") == 0);
-    cleanup_func(&cur_func);
-    //check string 2
-    strncpy(buf, test_func_2, BUF_SIZE);buf[BUF_SIZE-1] = 0;
-    cur_func = parse_func(sc, buf, 1, &er, NULL, 0);
-    REQUIRE(er.type != VAL_ERR);
-    REQUIRE(cur_func.n_args == 4);
-    INFO("func name=", cur_func.name);
-    CHECK(strcmp(cur_func.name, "f") == 0);
-    INFO("func arg=", cur_func.args[0]);
-    CHECK(strcmp(cur_func.args[0].val.val.s, "a") == 0);
-    INFO("func arg=", cur_func.args[1]);
-    CHECK(strcmp(cur_func.args[1].val.val.s, "b") == 0);
-    INFO("func arg=", cur_func.args[2]);
-    CHECK(strcmp(cur_func.args[2].val.val.s, "c") == 0);
-    CHECK(cur_func.args[3].val.val.x == 4);
-    cleanup_func(&cur_func);
-    //check string 3
-    strncpy(buf, test_func_3, BUF_SIZE);buf[BUF_SIZE-1] = 0;
-    cur_func = parse_func(sc, buf, 3, &er, NULL, 0);
-    REQUIRE(er.type != VAL_ERR);
-    REQUIRE(cur_func.n_args == 3);
-    INFO("func name=", cur_func.name);
-    CHECK(strcmp(cur_func.name, "foo") == 0);
-    INFO("func arg=", cur_func.args[0]);
-    CHECK(cur_func.args[0].val.type == VAL_ARRAY);
-    double* tmp_vec = cur_func.args[0].val.val.a;
-    CHECK(tmp_vec[0] == 1.0);
-    CHECK(tmp_vec[1] == 2.0);
-    CHECK(tmp_vec[2] == 3.0);
-    INFO("func arg=", cur_func.args[1].val.val.s);
-    CHECK(strcmp(cur_func.args[1].val.val.s, "a") == 0);
-    INFO("func arg=", cur_func.args[1]);
-    CHECK(strcmp(cur_func.args[2].val.val.s, "banana") == 0);
-    cleanup_func(&cur_func);
-    //check string 4
-    strncpy(buf, test_func_4, BUF_SIZE);buf[BUF_SIZE-1] = 0;
-    cur_func = parse_func(sc, buf, 3, &er, NULL, 0);
-    REQUIRE(er.type != VAL_ERR);
-    REQUIRE(cur_func.n_args == 3);
-    INFO("func name=", cur_func.name);
-    CHECK(strcmp(cur_func.name, "foo") == 0);
-    INFO("func arg=", cur_func.args[0].val.val.x);
-    CHECK(cur_func.args[0].val.val.x == 1);
-    INFO("func arg=", cur_func.args[1].val.val.s);
-    CHECK(strcmp(cur_func.args[1].val.val.s, "box(0,1,2,3)") == 0);
-    INFO("func arg=", cur_func.args[2].val.val.x);
-    CHECK(cur_func.args[2].val.val.x == 9);
-    cleanup_func(&cur_func);
-    //check string 5
-    strncpy(buf, test_func_5, BUF_SIZE);buf[BUF_SIZE-1] = 0;
-    cur_func = parse_func(sc, buf, 4, &er, NULL, 0);
-    REQUIRE(er.type != VAL_ERR);
-    REQUIRE(cur_func.n_args == 2);
-    INFO("func name=", cur_func.name);
-    CHECK(strcmp(cur_func.name, "foo") == 0);
-    INFO("func arg=", cur_func.args[0].val.val.x);
-    CHECK(cur_func.args[0].val.val.x == 1);
-    INFO("func arg=", cur_func.args[1].val.val.s);
-    CHECK(strcmp(cur_func.args[1].val.val.s, "b , c") == 0);
-    cleanup_func(&cur_func);
-    //check string 6
-    strncpy(buf, test_func_6, BUF_SIZE);buf[BUF_SIZE-1] = 0;
-    cur_func = parse_func(sc, buf, 1, &er, NULL, 0);
-    REQUIRE(er.type != VAL_ERR);
-    REQUIRE(cur_func.n_args == 1);
-    INFO("func name=", cur_func.name);
-    CHECK(strcmp(cur_func.name, "f") == 0);
-    INFO("func arg=", cur_func.args[0].val.val.x);
-    CHECK(cur_func.args[0].val.val.x == 3.5);
-    CHECK(strcmp(cur_func.args[0].name, "eps") == 0);
-    cleanup_func(&cur_func);
-    //check string 7
-    strncpy(buf, test_func_7, BUF_SIZE);buf[BUF_SIZE-1] = 0;
-    cur_func = parse_func(sc, buf, 1, &er, NULL, 0);
-    REQUIRE(er.type != VAL_ERR);
-    REQUIRE(cur_func.n_args == 1);
-    INFO("func name=", cur_func.name);
-    CHECK(strcmp(cur_func.name, "f") == 0);
-    INFO("func arg=", cur_func.args[0].val.val.s);
-    CHECK(strcmp(cur_func.args[0].val.val.s, "bar") == 0);
-    CHECK(strcmp(cur_func.args[0].name, "name") == 0);
-    cleanup_func(&cur_func);
-    //check string 8 (function declaration parsing)
-    strncpy(buf, test_func_8, BUF_SIZE);buf[BUF_SIZE-1] = 0;
-    cur_func = parse_func(sc, buf, 1, &er, NULL, true);
-    REQUIRE(er.type != VAL_ERR);
-    REQUIRE(cur_func.n_args == 3);
-    INFO("func name=", cur_func.name);
-    CHECK(strcmp(cur_func.name, "f") == 0);
-    CHECK(strcmp(cur_func.args[0].name, "a") == 0);
-    CHECK(strcmp(cur_func.args[1].name, "b1") == 0);
-    CHECK(strcmp(cur_func.args[2].name, "c2") == 0);
-    cleanup_func(&cur_func);
-    //check bad string 1
-    strncpy(buf, bad_test_func_1, BUF_SIZE);buf[BUF_SIZE-1] = 0;
-    cur_func = parse_func(sc, buf, 4, &er, NULL, 0);
-    CHECK(er.type == VAL_ERR);
-    CHECK(er.val.e->c == E_BAD_SYNTAX);
-    cleanup_val(&er);
-    cleanup_func(&cur_func);
-    //check bad string 2
-    strncpy(buf, bad_test_func_2, BUF_SIZE);buf[BUF_SIZE-1] = 0;
-    cur_func = parse_func(sc, buf, 4, &er, NULL, 0);
-    CHECK(er.type == VAL_ERR);
-    CHECK(er.val.e->c == E_BAD_SYNTAX);
-    cleanup_val(&er);
-    cleanup_func(&cur_func);
-    destroy_context(sc);
-}
-
-TEST_CASE("string handling") {
-    const size_t STR_SIZE = 64;
-    context* sc = make_context(NULL);
-    char buf[STR_SIZE];
-    size_t len;
-    //check that trimming an empty string works
-    buf[0] = 0;
-    char* str = trim_whitespace(buf, &len);
-    REQUIRE(str == buf);
-    CHECK(len == 0);
-    CHECK(str[0] == 0);
-    //check that parsing an empty (or all whitespace) string gives VAL_UNDEF
-    value tmp_val = parse_value(sc, buf);
-    CHECK(tmp_val.type == VAL_UNDEF);
-    cleanup_val(&tmp_val);
-    strncpy(buf, " ", STR_SIZE);
-    tmp_val = parse_value(sc, buf);
-    CHECK(tmp_val.type == VAL_UNDEF);
-    cleanup_val(&tmp_val);
-    strncpy(buf, "\t  \t\n", STR_SIZE);
-    tmp_val = parse_value(sc, buf);
-    CHECK(tmp_val.type == VAL_UNDEF);
-    cleanup_val(&tmp_val);
-    //now check that strings are the right length
-    for (size_t i = 1; i < STR_SIZE-1; ++i) {
-	for (size_t j = 0; j < i; ++j)
-	    buf[j] = 'a';
-	buf[0] = '\"';
-	buf[i] = '\"';
-	buf[i+1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.n_els == i);
-	cleanup_val(&tmp_val);
-    }
-    destroy_context(sc);
-}
-
-TEST_CASE("operations") {
-    context* sc = make_context(NULL);
-    char buf[BUF_SIZE];
-    SUBCASE("Arithmetic works") {
-        //single operations
-        strncpy(buf, "1+1.1", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        value tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type == VAL_NUM);
-        CHECK(tmp_val.val.x == 2.1);
-        strncpy(buf, "2-1.25", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type == VAL_NUM);
-        CHECK(tmp_val.val.x == 0.75);
-        strncpy(buf, "2*1.1", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type == VAL_NUM);
-        CHECK(tmp_val.val.x == 2.2);
-        strncpy(buf, "2.2/2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type == VAL_NUM);
-        CHECK(tmp_val.val.x == 1.1);
-        //order of operations
-        strncpy(buf, "1+3/2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type == VAL_NUM);
-        CHECK(tmp_val.val.x == 2.5);
-        strncpy(buf, "(1+3)/2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type == VAL_NUM);
-        CHECK(tmp_val.val.x == 2.0);
-        strncpy(buf, "2*9/4*3", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type == VAL_NUM);
-        CHECK(tmp_val.val.x == 1.5);
-    }
-    SUBCASE("Comparisons work") {
-	//create a single true and false, this makes things easier
-	value false_res = make_val_num(0);
-	value true_res = make_val_num(1);
-        strncpy(buf, "2 == 2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	value tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type != VAL_ERR);
-        CHECK(value_cmp(tmp_val, true_res) == 0);
-        strncpy(buf, "1 == 2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type != VAL_ERR);
-        CHECK(value_cmp(tmp_val, false_res) == 0);
-        strncpy(buf, "[2, 3] == [2, 3]", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type != VAL_ERR);
-        CHECK(value_cmp(tmp_val, true_res) == 0);
-        strncpy(buf, "[2, 3, 4] == [2, 3]", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type != VAL_ERR);
-        CHECK(value_cmp(tmp_val, false_res) == 0);
-        strncpy(buf, "[2, 3, 4] == [2, 3, 5]", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type != VAL_ERR);
-        CHECK(value_cmp(tmp_val, false_res) == 0);
-        strncpy(buf, "\"apple\" == \"apple\"", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type != VAL_ERR);
-        CHECK(value_cmp(tmp_val, true_res) == 0);
-        strncpy(buf, "\"apple\" == \"banana\"", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type != VAL_ERR);
-        CHECK(value_cmp(tmp_val, false_res) == 0);
-    }
-    SUBCASE("String concatenation works") {
-        //single operations
-        strncpy(buf, "\"foo\"+\"bar\"", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        value tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type == VAL_STR);
-        CHECK(strcmp(tmp_val.val.s, "foobar") == 0);
-        cleanup_val(&tmp_val);
-    }
-    SUBCASE("Ternary operators work") {
-	strncpy(buf, "(false) ? 100 : 200", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	value tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == 200);
-	strncpy(buf, "(true) ? 100 : 200", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == 100);
-	strncpy(buf, "(1 == 2) ? 100 : 200", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == 200);
-	strncpy(buf, "(2 == 2) ? 100 : 200", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == 100);
-	strncpy(buf, "(1 > 2) ? 100 : 200", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == 200);
-	strncpy(buf, "(1 < 2) ? 100 : 200", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == 100);
-	strncpy(buf, "(1 < 2) ? 100", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_BAD_SYNTAX);
-	INFO("message=", tmp_val.val.e->msg);
-	CHECK(strcmp(tmp_val.val.e->msg, "expected : in ternary") == 0);
-	cleanup_val(&tmp_val);
-    }
-    SUBCASE("Missing end graceful failure") {
-	strncpy(buf, "[1,2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	value tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	REQUIRE(tmp_val.val.e->c == E_BAD_SYNTAX);
-	INFO("message=", tmp_val.val.e->msg);
-	CHECK(strcmp(tmp_val.val.e->msg, "expected ]") == 0);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "a(1,2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_BAD_SYNTAX);
-	INFO("message=", tmp_val.val.e->msg);
-	CHECK(strcmp(tmp_val.val.e->msg, "expected )") == 0);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "\"1,2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_BAD_SYNTAX);
-	INFO("message=", tmp_val.val.e->msg);
-	CHECK(strcmp(tmp_val.val.e->msg, "unexpected \"") == 0);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "1,2]", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_BAD_SYNTAX);
-	INFO("message=", tmp_val.val.e->msg);
-	CHECK(strcmp(tmp_val.val.e->msg, "unexpected ]") == 0);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "1,2)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_BAD_SYNTAX);
-	INFO("message=", tmp_val.val.e->msg);
-	CHECK(strcmp(tmp_val.val.e->msg, "unexpected )") == 0);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "1,2\"", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_BAD_SYNTAX);
-	INFO("message=", tmp_val.val.e->msg);
-	CHECK(strcmp(tmp_val.val.e->msg, "unexpected \"") == 0);
-	cleanup_val(&tmp_val);
-    }
-    destroy_context(sc);
-}
-
-TEST_CASE("builtin functions") {
-    char buf[BUF_SIZE];
-    value tmp_val;
-    context* sc = make_context(NULL);
-    setup_builtins(sc);
-
-    SUBCASE("range()") {
-	strncpy(buf, "range(4)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_ARRAY);
-	CHECK(tmp_val.n_els == 4);
-	for (size_t i = 0; i < 4; ++i)
-	    CHECK(tmp_val.val.a[i] == i);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "range(1,4)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_ARRAY);
-	CHECK(tmp_val.n_els == 3);
-	for (size_t i = 0; i < 3; ++i)
-	    CHECK(tmp_val.val.a[i] == i+1);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "range(1,4,0.5)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_ARRAY);
-	CHECK(tmp_val.n_els == 6);
-	for (size_t i = 0; i < 6; ++i)
-	    CHECK(tmp_val.val.a[i] == 0.5*i+1);
-	cleanup_val(&tmp_val);
-        //graceful failure cases
-        strncpy(buf, "range()", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-        CHECK(tmp_val.val.e->c == E_LACK_TOKENS);
-	cleanup_val(&tmp_val);
-	//check that divisions by zero are avoided
-        strncpy(buf, "range(0,1,0)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-        CHECK(tmp_val.val.e->c == E_BAD_VALUE);
-	cleanup_val(&tmp_val);
-        strncpy(buf, "range(\"1\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-        CHECK(tmp_val.val.e->c == E_BAD_TYPE);
-	cleanup_val(&tmp_val);
-        strncpy(buf, "range(0.5,\"1\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-        CHECK(tmp_val.val.e->c == E_BAD_TYPE);
-	cleanup_val(&tmp_val);
-        strncpy(buf, "range(0.5,1,\"2\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-        CHECK(tmp_val.val.e->c == E_BAD_TYPE);
-	cleanup_val(&tmp_val);
-    }
-    SUBCASE("linspace()") {
-        strncpy(buf, "linspace(1,2,5)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type == VAL_ARRAY);
-        CHECK(tmp_val.n_els == 5);
-        for (size_t i = 0; i < 4; ++i) {
-            CHECK(tmp_val.val.a[i] == 1.0+0.25*i);
-        }
-        cleanup_val(&tmp_val);
-        strncpy(buf, "linspace(2,1,5)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-        CHECK(tmp_val.type == VAL_ARRAY);
-        CHECK(tmp_val.n_els == 5);
-        for (size_t i = 0; i < 4; ++i) {
-            CHECK(tmp_val.val.a[i] == 2.0-0.25*i);
-        }
-        cleanup_val(&tmp_val);
-        //graceful failure cases
-        strncpy(buf, "linspace(2,1)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-        CHECK(tmp_val.val.e->c == E_LACK_TOKENS);
-	cleanup_val(&tmp_val);
-        strncpy(buf, "linspace(2,1,1)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-        CHECK(tmp_val.val.e->c == E_BAD_VALUE);
-	cleanup_val(&tmp_val);
-        strncpy(buf, "linspace(\"2\",1,1)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-        CHECK(tmp_val.val.e->c == E_BAD_TYPE);
-	cleanup_val(&tmp_val);
-        strncpy(buf, "linspace(2,\"1\",1)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-        CHECK(tmp_val.val.e->c == E_BAD_TYPE);
-	cleanup_val(&tmp_val);
-        strncpy(buf, "linspace(2,1,\"1\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-        tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-        CHECK(tmp_val.val.e->c == E_BAD_TYPE);
-	cleanup_val(&tmp_val);
-    }
-    SUBCASE("flatten()") {
-	strncpy(buf, "flatten([])", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_LIST);
-	CHECK(tmp_val.n_els == 0);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "flatten([1,2,3])", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_LIST);
-	CHECK(tmp_val.n_els == 3);
-	for (size_t i = 0; i < 3; ++i) {
-	    CHECK(tmp_val.val.l[i].type == VAL_NUM);
-	    CHECK(tmp_val.val.l[i].val.x == i+1);
-	}
-	cleanup_val(&tmp_val);
-	strncpy(buf, "flatten([[1,2,3],[4,5],6])", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_LIST);
-	CHECK(tmp_val.n_els == 6);
-	for (size_t i = 0; i < 6; ++i) {
-	    CHECK(tmp_val.val.l[i].type == VAL_NUM);
-	    CHECK(tmp_val.val.l[i].val.x == i+1);
-	}
-	cleanup_val(&tmp_val);
-    }
-    SUBCASE("math functions") {
-	strncpy(buf, "sin(3.1415926535/2)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == doctest::Approx(1.0));
-	strncpy(buf, "sin(3.1415926535/6)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == doctest::Approx(0.5));
-	strncpy(buf, "cos(3.1415926535/2)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == doctest::Approx(0.0));
-	strncpy(buf, "cos(3.1415926535/6)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	strncpy(buf, "sqrt(3)/2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	value sqrt_val = parse_value(sc, buf);
-	CHECK(sqrt_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == doctest::Approx(sqrt_val.val.x));
-	strncpy(buf, "tan(3.141592653589793/4)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == doctest::Approx(1.0));
-	strncpy(buf, "tan(0)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == doctest::Approx(0.0));
-	strncpy(buf, "exp(0)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == doctest::Approx(1.0));
-	strncpy(buf, "exp(1)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == doctest::Approx(2.718281828));
-	//failure conditions
-	strncpy(buf, "sin()", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_LACK_TOKENS);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "cos()", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_LACK_TOKENS);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "tan()", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_LACK_TOKENS);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "exp()", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_LACK_TOKENS);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "sqrt()", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_LACK_TOKENS);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "sin(\"a\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_BAD_TYPE);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "cos(\"a\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_BAD_TYPE);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "tan(\"a\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_BAD_TYPE);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "exp(\"a\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_BAD_TYPE);
-	cleanup_val(&tmp_val);
-	strncpy(buf, "sqrt(\"a\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
-	tmp_val = parse_value(sc, buf);
-	REQUIRE(tmp_val.type == VAL_ERR);
-	CHECK(tmp_val.val.e->c == E_BAD_TYPE);
-	cleanup_val(&tmp_val);
-    }
-    destroy_context(sc);
+void test_num(value v, double x) {
+    CHECK(v.type == VAL_NUM);
+    CHECK(v.val.x == x);
+    CHECK(v.n_els == 1);
 }
 
 TEST_CASE("value parsing") {
@@ -582,40 +20,33 @@ TEST_CASE("value parsing") {
 	//test integers
 	strncpy(buf, "1", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == 1);
+	test_num(tmp_val, 1);
 	cleanup_val(&tmp_val);
 	strncpy(buf, "12", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == 12);
+	test_num(tmp_val, 12);
 	cleanup_val(&tmp_val);
 	//test floats
 	strncpy(buf, ".25", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == 0.25);
+	test_num(tmp_val, .25);
 	cleanup_val(&tmp_val);
 	strncpy(buf, "1.25", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == 1.25);
+	test_num(tmp_val, 1.25);
 	cleanup_val(&tmp_val);
 	//test scientific notation
 	strncpy(buf, ".25e10", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == 0.25e10);
+	test_num(tmp_val, 0.25e10);
 	cleanup_val(&tmp_val);
-	strncpy(buf, "1.25e10", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	strncpy(buf, "1.25e+10", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == 1.25e10);
+	test_num(tmp_val, 1.25e10);
 	cleanup_val(&tmp_val);
 	strncpy(buf, "1.25e-10", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_NUM);
-	CHECK(tmp_val.val.x == 1.25e-10);
+	test_num(tmp_val, 1.25e-10);
 	cleanup_val(&tmp_val);
     }
     SUBCASE("Reading strings to values works") {
@@ -784,6 +215,552 @@ TEST_CASE("value parsing") {
 		CHECK(tmp_val.val.l[i].val.a[j] == i*3 + j);
 	    }
 	}
+	cleanup_val(&tmp_val);
+    }
+    destroy_context(sc);
+}
+
+TEST_CASE("function parsing") {
+    char buf[BUF_SIZE];
+
+    const char* test_func_1 = "f()";
+    const char* test_func_2 = "f(\"a\", \"b\", \"c\", 4)";
+    const char* test_func_3 = "foo(vec(1,2,3),\"a\",\"banana\")";
+    const char* test_func_4 = "foo(1, \"box(0,1,2,3)\", 4+5)";
+    const char* test_func_5 = "foo ( 1 , \"b , c\" )";
+    const char* test_func_6 = "f(eps = 3.5)";
+    const char* test_func_7 = "f(name = \"bar\")";
+    const char* test_func_8 = "f(a, b1, c2)";
+    const char* bad_test_func_1 = "foo ( a , b , c";
+    const char* bad_test_func_2 = "foo ( \"a\" , \"b\" , \"c\"";
+
+    context* sc = make_context(NULL);
+    value er = make_val_undef();
+    //check string 1
+    strncpy(buf, test_func_1, BUF_SIZE);buf[BUF_SIZE-1] = 0;
+    cgs_func cur_func = parse_func(sc, buf, 1, &er, NULL, 0);
+    CHECK(er.type != VAL_ERR);
+    CHECK(cur_func.n_args == 0);
+    CHECK(strcmp(cur_func.name, "f") == 0);
+    cleanup_func(&cur_func);
+    //check string 2
+    strncpy(buf, test_func_2, BUF_SIZE);buf[BUF_SIZE-1] = 0;
+    cur_func = parse_func(sc, buf, 1, &er, NULL, 0);
+    REQUIRE(er.type != VAL_ERR);
+    REQUIRE(cur_func.n_args == 4);
+    INFO("func name=", cur_func.name);
+    CHECK(strcmp(cur_func.name, "f") == 0);
+    INFO("func arg=", cur_func.args[0]);
+    CHECK(strcmp(cur_func.args[0].val.val.s, "a") == 0);
+    INFO("func arg=", cur_func.args[1]);
+    CHECK(strcmp(cur_func.args[1].val.val.s, "b") == 0);
+    INFO("func arg=", cur_func.args[2]);
+    CHECK(strcmp(cur_func.args[2].val.val.s, "c") == 0);
+    CHECK(cur_func.args[3].val.val.x == 4);
+    cleanup_func(&cur_func);
+    //check string 3
+    strncpy(buf, test_func_3, BUF_SIZE);buf[BUF_SIZE-1] = 0;
+    cur_func = parse_func(sc, buf, 3, &er, NULL, 0);
+    REQUIRE(er.type != VAL_ERR);
+    REQUIRE(cur_func.n_args == 3);
+    INFO("func name=", cur_func.name);
+    CHECK(strcmp(cur_func.name, "foo") == 0);
+    INFO("func arg=", cur_func.args[0]);
+    CHECK(cur_func.args[0].val.type == VAL_ARRAY);
+    double* tmp_vec = cur_func.args[0].val.val.a;
+    CHECK(tmp_vec[0] == 1.0);
+    CHECK(tmp_vec[1] == 2.0);
+    CHECK(tmp_vec[2] == 3.0);
+    INFO("func arg=", cur_func.args[1].val.val.s);
+    CHECK(strcmp(cur_func.args[1].val.val.s, "a") == 0);
+    INFO("func arg=", cur_func.args[1]);
+    CHECK(strcmp(cur_func.args[2].val.val.s, "banana") == 0);
+    cleanup_func(&cur_func);
+    //check string 4
+    strncpy(buf, test_func_4, BUF_SIZE);buf[BUF_SIZE-1] = 0;
+    cur_func = parse_func(sc, buf, 3, &er, NULL, 0);
+    REQUIRE(er.type != VAL_ERR);
+    REQUIRE(cur_func.n_args == 3);
+    INFO("func name=", cur_func.name);
+    CHECK(strcmp(cur_func.name, "foo") == 0);
+    INFO("func arg=", cur_func.args[0].val.val.x);
+    CHECK(cur_func.args[0].val.val.x == 1);
+    INFO("func arg=", cur_func.args[1].val.val.s);
+    CHECK(strcmp(cur_func.args[1].val.val.s, "box(0,1,2,3)") == 0);
+    INFO("func arg=", cur_func.args[2].val.val.x);
+    CHECK(cur_func.args[2].val.val.x == 9);
+    cleanup_func(&cur_func);
+    //check string 5
+    strncpy(buf, test_func_5, BUF_SIZE);buf[BUF_SIZE-1] = 0;
+    cur_func = parse_func(sc, buf, 4, &er, NULL, 0);
+    REQUIRE(er.type != VAL_ERR);
+    REQUIRE(cur_func.n_args == 2);
+    INFO("func name=", cur_func.name);
+    CHECK(strcmp(cur_func.name, "foo") == 0);
+    INFO("func arg=", cur_func.args[0].val.val.x);
+    CHECK(cur_func.args[0].val.val.x == 1);
+    INFO("func arg=", cur_func.args[1].val.val.s);
+    CHECK(strcmp(cur_func.args[1].val.val.s, "b , c") == 0);
+    cleanup_func(&cur_func);
+    //check string 6
+    strncpy(buf, test_func_6, BUF_SIZE);buf[BUF_SIZE-1] = 0;
+    cur_func = parse_func(sc, buf, 1, &er, NULL, 0);
+    REQUIRE(er.type != VAL_ERR);
+    REQUIRE(cur_func.n_args == 1);
+    INFO("func name=", cur_func.name);
+    CHECK(strcmp(cur_func.name, "f") == 0);
+    INFO("func arg=", cur_func.args[0].val.val.x);
+    CHECK(cur_func.args[0].val.val.x == 3.5);
+    CHECK(strcmp(cur_func.args[0].name, "eps") == 0);
+    cleanup_func(&cur_func);
+    //check string 7
+    strncpy(buf, test_func_7, BUF_SIZE);buf[BUF_SIZE-1] = 0;
+    cur_func = parse_func(sc, buf, 1, &er, NULL, 0);
+    REQUIRE(er.type != VAL_ERR);
+    REQUIRE(cur_func.n_args == 1);
+    INFO("func name=", cur_func.name);
+    CHECK(strcmp(cur_func.name, "f") == 0);
+    INFO("func arg=", cur_func.args[0].val.val.s);
+    CHECK(strcmp(cur_func.args[0].val.val.s, "bar") == 0);
+    CHECK(strcmp(cur_func.args[0].name, "name") == 0);
+    cleanup_func(&cur_func);
+    //check string 8 (function declaration parsing)
+    strncpy(buf, test_func_8, BUF_SIZE);buf[BUF_SIZE-1] = 0;
+    cur_func = parse_func(sc, buf, 1, &er, NULL, true);
+    REQUIRE(er.type != VAL_ERR);
+    REQUIRE(cur_func.n_args == 3);
+    INFO("func name=", cur_func.name);
+    CHECK(strcmp(cur_func.name, "f") == 0);
+    CHECK(strcmp(cur_func.args[0].name, "a") == 0);
+    CHECK(strcmp(cur_func.args[1].name, "b1") == 0);
+    CHECK(strcmp(cur_func.args[2].name, "c2") == 0);
+    cleanup_func(&cur_func);
+    //check bad string 1
+    strncpy(buf, bad_test_func_1, BUF_SIZE);buf[BUF_SIZE-1] = 0;
+    cur_func = parse_func(sc, buf, 4, &er, NULL, 0);
+    CHECK(er.type == VAL_ERR);
+    CHECK(er.val.e->c == E_BAD_SYNTAX);
+    cleanup_val(&er);
+    cleanup_func(&cur_func);
+    //check bad string 2
+    strncpy(buf, bad_test_func_2, BUF_SIZE);buf[BUF_SIZE-1] = 0;
+    cur_func = parse_func(sc, buf, 4, &er, NULL, 0);
+    CHECK(er.type == VAL_ERR);
+    CHECK(er.val.e->c == E_BAD_SYNTAX);
+    cleanup_val(&er);
+    cleanup_func(&cur_func);
+    destroy_context(sc);
+}
+
+TEST_CASE("string handling") {
+    const size_t STR_SIZE = 64;
+    context* sc = make_context(NULL);
+    char buf[STR_SIZE];
+    size_t len;
+    //check that trimming an empty string works
+    buf[0] = 0;
+    char* str = trim_whitespace(buf, &len);
+    REQUIRE(str == buf);
+    CHECK(len == 0);
+    CHECK(str[0] == 0);
+    //check that parsing an empty (or all whitespace) string gives VAL_UNDEF
+    value tmp_val = parse_value(sc, buf);
+    CHECK(tmp_val.type == VAL_UNDEF);
+    CHECK(tmp_val.n_els == 0);
+    cleanup_val(&tmp_val);
+    strncpy(buf, " ", STR_SIZE);
+    tmp_val = parse_value(sc, buf);
+    CHECK(tmp_val.type == VAL_UNDEF);
+    CHECK(tmp_val.n_els == 0);
+    cleanup_val(&tmp_val);
+    strncpy(buf, "\t  \t\n", STR_SIZE);
+    tmp_val = parse_value(sc, buf);
+    CHECK(tmp_val.type == VAL_UNDEF);
+    CHECK(tmp_val.n_els == 0);
+    cleanup_val(&tmp_val);
+    //now check that strings are the right length
+    for (size_t i = 1; i < STR_SIZE-1; ++i) {
+	for (size_t j = 0; j < i; ++j)
+	    buf[j] = 'a';
+	buf[0] = '\"';
+	buf[i] = '\"';
+	buf[i+1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.n_els == i);
+	cleanup_val(&tmp_val);
+	CHECK(tmp_val.n_els == 0);
+    }
+    destroy_context(sc);
+}
+
+TEST_CASE("operations") {
+    context* sc = make_context(NULL);
+    char buf[BUF_SIZE];
+    SUBCASE("Arithmetic works") {
+        //single operations
+        strncpy(buf, "1+1.1", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        value tmp_val = parse_value(sc, buf);
+	test_num(tmp_val, 2.1);
+        strncpy(buf, "2-1.25", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	test_num(tmp_val, 0.75);
+        strncpy(buf, "2*1.1", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	test_num(tmp_val, 2.2);
+        strncpy(buf, "2.2/2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	test_num(tmp_val, 1.1);
+        //order of operations
+        strncpy(buf, "1+3/2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	test_num(tmp_val, 2.5);
+        strncpy(buf, "(1+3)/2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	test_num(tmp_val, 2.0);
+        strncpy(buf, "2*9/4*3", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	test_num(tmp_val, 1.5);
+    }
+    SUBCASE("Comparisons work") {
+	//create a single true and false, this makes things easier
+	value false_res = make_val_num(0);
+	value true_res = make_val_num(1);
+        strncpy(buf, "2 == 2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	value tmp_val = parse_value(sc, buf);
+        CHECK(tmp_val.type != VAL_ERR);
+        CHECK(value_cmp(tmp_val, true_res) == 0);
+        strncpy(buf, "1 == 2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+        CHECK(tmp_val.type != VAL_ERR);
+        CHECK(value_cmp(tmp_val, false_res) == 0);
+        strncpy(buf, "[2, 3] == [2, 3]", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+        CHECK(tmp_val.type != VAL_ERR);
+        CHECK(value_cmp(tmp_val, true_res) == 0);
+        strncpy(buf, "[2, 3, 4] == [2, 3]", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+        CHECK(tmp_val.type != VAL_ERR);
+        CHECK(value_cmp(tmp_val, false_res) == 0);
+        strncpy(buf, "[2, 3, 4] == [2, 3, 5]", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+        CHECK(tmp_val.type != VAL_ERR);
+        CHECK(value_cmp(tmp_val, false_res) == 0);
+        strncpy(buf, "\"apple\" == \"apple\"", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+        CHECK(tmp_val.type != VAL_ERR);
+        CHECK(value_cmp(tmp_val, true_res) == 0);
+        strncpy(buf, "\"apple\" == \"banana\"", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+        CHECK(tmp_val.type != VAL_ERR);
+        CHECK(value_cmp(tmp_val, false_res) == 0);
+    }
+    SUBCASE("String concatenation works") {
+        //single operations
+        strncpy(buf, "\"foo\"+\"bar\"", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        value tmp_val = parse_value(sc, buf);
+        CHECK(tmp_val.type == VAL_STR);
+        CHECK(strcmp(tmp_val.val.s, "foobar") == 0);
+	CHECK(tmp_val.n_els == 7);
+        cleanup_val(&tmp_val);
+	CHECK(tmp_val.n_els == 0);
+    }
+    SUBCASE("Ternary operators work") {
+	strncpy(buf, "(false) ? 100 : 200", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	value tmp_val = parse_value(sc, buf);
+	test_num(tmp_val, 200);
+	strncpy(buf, "(true) ? 100 : 200", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	test_num(tmp_val, 100);
+	strncpy(buf, "(1 == 2) ? 100 : 200", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	test_num(tmp_val, 200);
+	strncpy(buf, "(2 == 2) ? 100 : 200", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	test_num(tmp_val, 100);
+	strncpy(buf, "(1 > 2) ? 100 : 200", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	test_num(tmp_val, 200);
+	strncpy(buf, "(1 < 2) ? 100 : 200", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	test_num(tmp_val, 100);
+	strncpy(buf, "(1 < 2) ? 100", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_BAD_SYNTAX);
+	INFO("message=", tmp_val.val.e->msg);
+	CHECK(strcmp(tmp_val.val.e->msg, "expected : in ternary") == 0);
+	cleanup_val(&tmp_val);
+    }
+    SUBCASE("Missing end graceful failure") {
+	strncpy(buf, "[1,2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	value tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	REQUIRE(tmp_val.val.e->c == E_BAD_SYNTAX);
+	INFO("message=", tmp_val.val.e->msg);
+	CHECK(strcmp(tmp_val.val.e->msg, "expected ]") == 0);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "a(1,2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_BAD_SYNTAX);
+	INFO("message=", tmp_val.val.e->msg);
+	CHECK(strcmp(tmp_val.val.e->msg, "expected )") == 0);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "\"1,2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_BAD_SYNTAX);
+	INFO("message=", tmp_val.val.e->msg);
+	CHECK(strcmp(tmp_val.val.e->msg, "unexpected \"") == 0);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "1,2]", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_BAD_SYNTAX);
+	INFO("message=", tmp_val.val.e->msg);
+	CHECK(strcmp(tmp_val.val.e->msg, "unexpected ]") == 0);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "1,2)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_BAD_SYNTAX);
+	INFO("message=", tmp_val.val.e->msg);
+	CHECK(strcmp(tmp_val.val.e->msg, "unexpected )") == 0);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "1,2\"", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_BAD_SYNTAX);
+	INFO("message=", tmp_val.val.e->msg);
+	CHECK(strcmp(tmp_val.val.e->msg, "unexpected \"") == 0);
+	cleanup_val(&tmp_val);
+    }
+    destroy_context(sc);
+}
+
+TEST_CASE("builtin functions") {
+    char buf[BUF_SIZE];
+    value tmp_val;
+    context* sc = make_context(NULL);
+    setup_builtins(sc);
+
+    SUBCASE("range()") {
+	strncpy(buf, "range(4)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_ARRAY);
+	CHECK(tmp_val.n_els == 4);
+	for (size_t i = 0; i < 4; ++i)
+	    CHECK(tmp_val.val.a[i] == i);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "range(1,4)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_ARRAY);
+	CHECK(tmp_val.n_els == 3);
+	for (size_t i = 0; i < 3; ++i)
+	    CHECK(tmp_val.val.a[i] == i+1);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "range(1,4,0.5)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_ARRAY);
+	CHECK(tmp_val.n_els == 6);
+	for (size_t i = 0; i < 6; ++i)
+	    CHECK(tmp_val.val.a[i] == 0.5*i+1);
+	cleanup_val(&tmp_val);
+        //graceful failure cases
+        strncpy(buf, "range()", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+        CHECK(tmp_val.val.e->c == E_LACK_TOKENS);
+	cleanup_val(&tmp_val);
+	//check that divisions by zero are avoided
+        strncpy(buf, "range(0,1,0)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+        CHECK(tmp_val.val.e->c == E_BAD_VALUE);
+	cleanup_val(&tmp_val);
+        strncpy(buf, "range(\"1\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+        CHECK(tmp_val.val.e->c == E_BAD_TYPE);
+	cleanup_val(&tmp_val);
+        strncpy(buf, "range(0.5,\"1\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+        CHECK(tmp_val.val.e->c == E_BAD_TYPE);
+	cleanup_val(&tmp_val);
+        strncpy(buf, "range(0.5,1,\"2\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+        CHECK(tmp_val.val.e->c == E_BAD_TYPE);
+	cleanup_val(&tmp_val);
+    }
+    SUBCASE("linspace()") {
+        strncpy(buf, "linspace(1,2,5)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+        CHECK(tmp_val.type == VAL_ARRAY);
+        CHECK(tmp_val.n_els == 5);
+        for (size_t i = 0; i < 4; ++i) {
+            CHECK(tmp_val.val.a[i] == 1.0+0.25*i);
+        }
+        cleanup_val(&tmp_val);
+        strncpy(buf, "linspace(2,1,5)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+        CHECK(tmp_val.type == VAL_ARRAY);
+        CHECK(tmp_val.n_els == 5);
+        for (size_t i = 0; i < 4; ++i) {
+            CHECK(tmp_val.val.a[i] == 2.0-0.25*i);
+        }
+        cleanup_val(&tmp_val);
+        //graceful failure cases
+        strncpy(buf, "linspace(2,1)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+        CHECK(tmp_val.val.e->c == E_LACK_TOKENS);
+	cleanup_val(&tmp_val);
+        strncpy(buf, "linspace(2,1,1)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+        CHECK(tmp_val.val.e->c == E_BAD_VALUE);
+	cleanup_val(&tmp_val);
+        strncpy(buf, "linspace(\"2\",1,1)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+        CHECK(tmp_val.val.e->c == E_BAD_TYPE);
+	cleanup_val(&tmp_val);
+        strncpy(buf, "linspace(2,\"1\",1)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+        CHECK(tmp_val.val.e->c == E_BAD_TYPE);
+	cleanup_val(&tmp_val);
+        strncpy(buf, "linspace(2,1,\"1\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+        tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+        CHECK(tmp_val.val.e->c == E_BAD_TYPE);
+	cleanup_val(&tmp_val);
+    }
+    SUBCASE("flatten()") {
+	strncpy(buf, "flatten([])", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_LIST);
+	CHECK(tmp_val.n_els == 0);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "flatten([1,2,3])", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_LIST);
+	CHECK(tmp_val.n_els == 3);
+	for (size_t i = 0; i < 3; ++i) {
+	    test_num(tmp_val.val.l[i], i+1);
+	}
+	cleanup_val(&tmp_val);
+	strncpy(buf, "flatten([[1,2,3],[4,5],6])", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_LIST);
+	CHECK(tmp_val.n_els == 6);
+	for (size_t i = 0; i < 6; ++i)
+	    test_num(tmp_val.val.l[i], i+1);
+
+	cleanup_val(&tmp_val);
+    }
+    SUBCASE("math functions") {
+	strncpy(buf, "math.sin(3.1415926535/2)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_NUM);
+	CHECK(tmp_val.val.x == doctest::Approx(1.0));
+	CHECK(tmp_val.n_els == 1);
+	strncpy(buf, "math.sin(3.1415926535/6)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_NUM);
+	CHECK(tmp_val.val.x == doctest::Approx(0.5));
+	CHECK(tmp_val.n_els == 1);
+	strncpy(buf, "math.cos(3.1415926535/2)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_NUM);
+	CHECK(tmp_val.val.x == doctest::Approx(0.0));
+	CHECK(tmp_val.n_els == 1);
+	strncpy(buf, "math.cos(3.1415926535/6)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_NUM);
+	CHECK(tmp_val.n_els == 1);
+	strncpy(buf, "math.sqrt(3)/2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	value sqrt_val = parse_value(sc, buf);
+	CHECK(sqrt_val.type == VAL_NUM);
+	CHECK(tmp_val.n_els == 1);
+	CHECK(tmp_val.val.x == doctest::Approx(sqrt_val.val.x));
+	strncpy(buf, "math.tan(3.141592653589793/4)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_NUM);
+	CHECK(tmp_val.n_els == 1);
+	CHECK(tmp_val.val.x == doctest::Approx(1.0));
+	strncpy(buf, "math.tan(0)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_NUM);
+	CHECK(tmp_val.n_els == 1);
+	CHECK(tmp_val.val.x == doctest::Approx(0.0));
+	strncpy(buf, "math.exp(0)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_NUM);
+	CHECK(tmp_val.val.x == doctest::Approx(1.0));
+	CHECK(tmp_val.n_els == 1);
+	strncpy(buf, "math.exp(1)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_NUM);
+	CHECK(tmp_val.val.x == doctest::Approx(2.718281828));
+	CHECK(tmp_val.n_els == 1);
+	strncpy(buf, "math.log(1)", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	CHECK(tmp_val.type == VAL_NUM);
+	CHECK(tmp_val.val.x == 0);
+	CHECK(tmp_val.n_els == 1);
+	//failure conditions
+	strncpy(buf, "math.sin()", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_LACK_TOKENS);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "math.cos()", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_LACK_TOKENS);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "math.tan()", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_LACK_TOKENS);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "math.exp()", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_LACK_TOKENS);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "math.sqrt()", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_LACK_TOKENS);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "math.sin(\"a\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_BAD_TYPE);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "math.cos(\"a\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_BAD_TYPE);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "math.tan(\"a\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_BAD_TYPE);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "math.exp(\"a\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_BAD_TYPE);
+	cleanup_val(&tmp_val);
+	strncpy(buf, "math.sqrt(\"a\")", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp_val = parse_value(sc, buf);
+	REQUIRE(tmp_val.type == VAL_ERR);
+	CHECK(tmp_val.val.e->c == E_BAD_TYPE);
 	cleanup_val(&tmp_val);
     }
     destroy_context(sc);
@@ -1038,29 +1015,40 @@ value test_fun_gamma(context* c, cgs_func f) {
 }
 
 TEST_CASE("context lookups") {
-    const char* letters = "etaon";
+    const char* letters = "etaoin";
     size_t n_letters = strlen(letters);
-    char name[4];
-    name[3] = 0;
+    const size_t GEN_LEN = 4;
+    char name[GEN_LEN+1];
+    memset(name, 0, GEN_LEN+1);
     context* c = make_context(NULL);
+    size_t n_combs = 1;
+    for (size_t i = 0; i < GEN_LEN; ++i)
+	n_combs *= n_letters;
 
     //add a whole bunch of words using the most common letters
     value v;
-    size_t count = 0;
-    for (size_t i = 0; i < n_letters; ++i) {
-	name[0] = letters[i];
-	for (size_t j = 0; j < n_letters; ++j) {
-	    name[1] = letters[j];
-	    for (size_t k = 0; k < n_letters; ++k) {
-		name[2] = letters[k];
-		set_value(c, name, make_val_num(count), 1);
-		v = lookup(c, name);
-		CHECK(v.type == VAL_NUM);
-		CHECK(v.val.x == count);
-		count++;
-	    }
-	}
+    size_t before_size = c->n_memb;
+    auto start = std::chrono::steady_clock::now();
+    for (size_t i = 0; i < n_combs; ++i) {
+	size_t j = i;
+	size_t k = 0;
+	do {
+	    name[k++] = letters[j % n_letters];
+	    j /= n_letters;
+	} while (j && k < GEN_LEN);
+	set_value(c, name, make_val_num(i), 1);
+	v = lookup(c, name);
+	test_num(v, i);
     }
+    auto end = std::chrono::steady_clock::now();
+    double time = std::chrono::duration <double, std::milli> (end-start).count();
+    printf("took %f ms to set %lu elements\n", time, n_combs);
+    //lookup something not in the context
+    CHECK(c->n_memb == n_combs+before_size);
+    v = lookup(c, "vetaon");
+    CHECK(v.type == VAL_UNDEF);
+    CHECK(v.val.x == 0);
+    CHECK(v.n_els == 0);
     destroy_context(c);
 }
 
@@ -1146,7 +1134,7 @@ TEST_CASE("context parsing") {
 	//first we add a bunch of arbitrary variables to make searching harder for the parser
 	const char* lines1[] = {
 	    "Vodkis=1","Pagne=2","Meadaj=3","whis=4","nac4=5","RaKi=6","gyn=7","cid=8","Daiqui=9","Mooshi=10","Magnac=2","manChe=3","tes=4","Bourbu=5","magna=6","sak=7","Para=8","Keffi=9","Guino=10","Uuqax=11","Thraxeods=12","Trinzoins=13","gheds=14","theSoild=15","vengirs=16",
-	    "y = 2.0", "xs = linspace(0, y, 10000)", "arr1 = [sin(6*x/y) for x in xs]" };
+	    "y = 2.0", "xs = linspace(0, y, 10000)", "arr1 = [math.sin(6*x/y) for x in xs]" };
 	size_t n_lines1 = sizeof(lines1)/sizeof(char*);
 	line_buffer* b_1 = make_line_buffer_lines(lines1, n_lines1);
 	const char* lines2[] = { "arr2 = [gam(x/y) for x in xs]" };
