@@ -238,7 +238,7 @@ TEST_CASE("function parsing") {
     value er = make_val_undef();
     //check string 1
     strncpy(buf, test_func_1, BUF_SIZE);buf[BUF_SIZE-1] = 0;
-    cgs_func cur_func = parse_func(sc, buf, 1, &er, NULL, 0);
+    func_call cur_func = parse_func(sc, buf, 1, &er, NULL, 0);
     CHECK(er.type != VAL_ERR);
     CHECK(cur_func.n_args == 0);
     CHECK(strcmp(cur_func.name, "f") == 0);
@@ -989,7 +989,7 @@ TEST_CASE("line_buffer lb_get_enclosed") {
     }
 }
 
-value test_fun_call(context* c, cgs_func f) {
+value test_fun_call(context* c, func_call f) {
     value ret;
     if (f.n_args < 1)
 	return make_val_error(E_LACK_TOKENS, "expected 1 argument");
@@ -1005,7 +1005,7 @@ value test_fun_call(context* c, cgs_func f) {
     return f.args[0].val;
 }
 
-value test_fun_gamma(context* c, cgs_func f) {
+value test_fun_gamma(context* c, func_call f) {
     if (f.n_args < 1)
 	return make_val_error(E_LACK_TOKENS, "expected 1 argument");
     if (f.args[0].val.type != VAL_NUM)
@@ -1153,7 +1153,7 @@ TEST_CASE("context parsing") {
 	destroy_line_buffer(b_2);
     }
 }
-value cgs_gen_gaussian_source(context* c, cgs_func f) {
+value cgs_gen_gaussian_source(context* c, func_call f) {
     static const valtype SRC_SIG[] = {VAL_STR, VAL_NUM, VAL_NUM, VAL_NUM, VAL_NUM, VAL_NUM};
     value ret = check_signature(f, SIGLEN(SRC_SIG), SIGLEN(SRC_SIG)+3, SRC_SIG);
     if (ret.type)
@@ -1181,7 +1181,7 @@ value cgs_gen_gaussian_source(context* c, cgs_func f) {
     set_value(ret.val.c, "region", f.args[f.n_args-1].val, 1);
     return ret;
 }
-value cgs_gen_box(context* c, cgs_func f) {
+value cgs_gen_box(context* c, func_call f) {
     static const valtype BOX_SIG[] = {VAL_ARRAY, VAL_ARRAY};   
     value ret = check_signature(f, SIGLEN(BOX_SIG), SIGLEN(BOX_SIG)+3, BOX_SIG);
     if (ret.type)

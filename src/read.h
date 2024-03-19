@@ -15,7 +15,7 @@
 #define FUNC_BUF_SIZE 	256
 #define MAX_NUM_SIZE	10
 #define LINE_SIZE 	512
-#define DEF_STACK_SIZE	8
+#define STACK_SIZE	8
 
 //keywords
 #define KEY_CLASS_LEN	5
@@ -39,10 +39,10 @@
 struct value;
 struct context;
 struct user_func;
-struct cgs_func;
+struct func_call;
 
 //constants
-typedef struct value (*lib_call)(struct context*, struct cgs_func);
+typedef struct value (*lib_call)(struct context*, struct func_call);
 typedef unsigned int _uint;
 typedef unsigned char _uint8;
 
@@ -65,7 +65,7 @@ inline void* xrealloc(void* p, size_t nsize) {
 //generic stack class
 #define TYPED_A(NAME,TYPE) NAME##TYPE
 #define TYPED(NAME,TYPE) TYPED_A(NAME, _##TYPE)
-#define WRAP_MATH_FN(FN) value TYPED(fun,FN)(struct context* c, cgs_func f) {		\
+#define WRAP_MATH_FN(FN) value TYPED(fun,FN)(struct context* c, func_call f) {		\
     value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG);	\
     if (sto.type == 0)									\
 	return make_val_num( FN(f.args[0].val.val.x) );					\
@@ -95,49 +95,33 @@ typedef TYPED3(PAIR,TA,TB) p(TA,TB)
 #define stack(TYPE) struct TYPED(STACK,TYPE)
 #define STACK_DEF(TYPE) stack(TYPE) {							\
     size_t ptr;										\
-    size_t bsize;									\
-    TYPE* buf;										\
+    TYPE buf[STACK_SIZE];								\
 };											\
-int TYPED(STACK_GROW,TYPE)(stack(TYPE)* s, size_t new_size) {				\
-    if (new_size <= s->bsize) return 0;							\
-    TYPE* tmp = (TYPE*)malloc(sizeof(TYPE)*new_size);					\
-    if (!tmp) return 1;									\
-    memcpy(tmp, s->buf, sizeof(TYPE)*s->ptr);						\
-    free(s->buf);									\
-    s->buf = tmp;									\
-    if (new_size > s->ptr) memset(tmp + s->ptr, 0, (new_size-s->ptr)*sizeof(TYPE));	\
-    s->buf = tmp;									\
-    s->bsize = new_size;								\
-    return 0;										\
-}											\
 stack(TYPE) TYPED(MAKE_STACK,TYPE)() {							\
-    stack(TYPE) ret;ret.ptr = 0;ret.bsize = DEF_STACK_SIZE;				\
-    ret.buf = (TYPE*)calloc(DEF_STACK_SIZE, sizeof(TYPE));				\
-    if (!ret.buf) ret.bsize = 0;							\
+    stack(TYPE) ret;									\
+    ret.ptr = 0;									\
+    memset(ret.buf, 0, sizeof(TYPE)*STACK_SIZE);					\
     return ret;										\
 }											\
 void TYPED(DESTROY_STACK,TYPE) (stack(TYPE)* s, void (*destroy_el)(TYPE*)) {		\
-    if (!s) return;									\
-    if (destroy_el) {									\
-	for (size_t i = 0; i < s->ptr; ++i) destroy_el(s->buf + i);			\
-    }											\
-    free(s->buf);									\
+    for (size_t i = 0; i < s->ptr; ++i)							\
+	destroy_el(s->buf + i);								\
+    s->ptr = 0;										\
 }											\
 int TYPED(STACK_PUSH,TYPE) (stack(TYPE)* s, TYPE el) {					\
-    int res = 0;									\
-    if (s->ptr == s->bsize) res = TYPED(STACK_GROW,TYPE)(s, 2*s->bsize);		\
-    if (res) return res;								\
+    if (s->ptr == STACK_SIZE)								\
+	return 1;									\
     s->buf[s->ptr++] = el;								\
     return 0;										\
 }											\
 int TYPED(STACK_POP,TYPE)(stack(TYPE)* s, TYPE* sto) {					\
-    if (s->ptr == 0 || s->ptr >= s->bsize) return 1;					\
+    if (s->ptr == 0 || s->ptr >= STACK_SIZE) return 1;					\
     s->ptr -= 1;									\
     if (sto) *sto = s->buf[s->ptr];							\
     return 0;										\
 }											\
 int TYPED(STACK_PEEK,TYPE)(stack(TYPE)* s, size_t ind, TYPE* sto) {			\
-    if (ind == 0 || ind > s->ptr || ind > s->bsize) return 1;				\
+    if (ind == 0 || ind > s->ptr || ind > STACK_SIZE) return 1;				\
     if (sto) *sto = s->buf[s->ptr-ind];							\
     return 0;										\
 }
@@ -311,7 +295,7 @@ value make_val_list(const value* vs, size_t n_vs);
 /**
  * Add a new callable function with the signature sig and function pointer corresponding to the executed code. This function must accept a function and a pointer to an error code and return a value.
  */
-value make_val_func(const char* name, size_t n_args, value (*p_exec)(struct context*, struct cgs_func));
+value make_val_func(const char* name, size_t n_args, value (*p_exec)(struct context*, struct func_call));
 /**
  * make an instance object with the given type
  * p: the parent of the current instance (i.e. its owner
@@ -400,7 +384,7 @@ void val_div(value* l, value r);
  */
 void val_exp(value* l, value r);
 
-/** ============================ cgs_func ============================ **/
+/** ============================ func_call ============================ **/
 
 /**
  * A class which stores a labeled value.
@@ -412,19 +396,19 @@ typedef struct name_val_pair {
 struct name_val_pair make_name_val_pair(const char* p_name, value p_val);
 void cleanup_name_val_pair(name_val_pair nv);
 
-typedef struct cgs_func {
+typedef struct func_call {
     char* name;
     name_val_pair args[ARGS_BUF_SIZE];
     size_t n_args;
-} cgs_func;
+} func_call;
 
-cgs_func copy_func(const cgs_func o);
-void cleanup_func(cgs_func* o);
-void swap(cgs_func* a, cgs_func* b);
+func_call copy_func(const func_call o);
+void cleanup_func(func_call* o);
+void swap(func_call* a, func_call* b);
 /**
  * Find the named argument with the matching name
  */
-value lookup_named(const cgs_func f, const char* name);
+value lookup_named(const func_call f, const char* name);
 
 /** ============================ context ============================ **/
 
@@ -527,15 +511,15 @@ int lookup_float(const context* c, const char* str, double* sto);
  */
 void set_value(struct context* c, const char* name, value new_val, int copy);
 /**
- * Given the string starting at token, and the index of an open paren parse the result into a cgs_func struct.
+ * Given the string starting at token, and the index of an open paren parse the result into a func_call struct.
  * token: a c-string which is modified in place that contains the function
  * open_par_ind: the location of the open parenthesis
- * f: the cgs_func that information should be saved to
+ * f: the func_call that information should be saved to
  * end: If not NULL, a pointer to the first character after the end of the string is stored here. If an error occurred during parsing end will be set to NULL.
  * name_only: if set to true, then only the names of the function arguments will be set and all values will be set to undefined. This is useful for handling function declarations
  * returns: an errorcode if an invalid string was supplied.
  */
-cgs_func parse_func(struct context* c, char* token, long open_par_ind, value* v_er, char** end, int name_only);
+func_call parse_func(struct context* c, char* token, long open_par_ind, value* v_er, char** end, int name_only);
 /**
  * Given a string str (which will be modified by this call), return a value corresponding to the expression str
  * c: the context to use when looking for variables and functions
@@ -557,9 +541,9 @@ value read_from_lines(struct context* c, const line_buffer* b);
  * A class for functions defined by the user along with the implementation code
  */
 typedef struct user_func {
-    cgs_func call_sig;
+    func_call call_sig;
     line_buffer* code_lines;
-    value (*exec)(context*, cgs_func);
+    value (*exec)(context*, func_call);
 } user_func;
 
 /**
@@ -569,7 +553,7 @@ typedef struct user_func {
  * n: the number of characters currently in the buffer, see read_cgs_line
  * fp: the file pointer to read from
  */
-user_func* make_user_func_lb(cgs_func sig, line_buffer* b);
+user_func* make_user_func_lb(func_call sig, line_buffer* b);
 /**
  * constructor
  * sig: this specifies the signature of the function used when calling it
@@ -577,7 +561,7 @@ user_func* make_user_func_lb(cgs_func sig, line_buffer* b);
  * n: the number of characters currently in the buffer, see read_cgs_line
  * fp: the file pointer to read from
  */
-user_func* make_user_func_ex(value (*p_exec)(context*, cgs_func));
+user_func* make_user_func_ex(value (*p_exec)(context*, func_call));
 /**
  * create a deep copy of the user_func o and return it. The result must be destroyed using cleanup_user_func.
  */
@@ -589,7 +573,7 @@ void destroy_user_func(user_func* uf);
 /**
  * evaluate the function
  */
-value uf_eval(user_func* uf, context* c, cgs_func call);
+value uf_eval(user_func* uf, context* c, func_call call);
 
 /** ============================ builtin functions ============================ **/
 /**
@@ -600,35 +584,35 @@ value uf_eval(user_func* uf, context* c, cgs_func call);
  * sig: the first f.n_args arguments in f (assuming min_args<=f.n_args<max_args) must match the specified signature. This array must be large enough to hold max_args
  * returns: an error with an appropriate message or undefined if there was no error
  */
-value check_signature(cgs_func f, size_t min_args, size_t max_args, const valtype* sig);
+value check_signature(func_call f, size_t min_args, size_t max_args, const valtype* sig);
 /**
  * Get the type of a value
  */
-value get_type(struct context* c, cgs_func tmp_f);
+value get_type(struct context* c, func_call tmp_f);
 /**
  * Make a range following python syntax. If one argument is supplied then a list with tmp_f.args[0] elements is created starting at index 0 and going up to (but not including) tmp_f.args[0]. If two arguments are supplied then the range is from (tmp_f.args[0], tmp_f.args[1]). If three arguments are supplied then the range (tmp_f.args[0], tmp_f.args[1]) is still returned, but now the spacing between successive elements is tmp_f.args[2].
  */
-value make_range(struct context* c, cgs_func tmp_f);
+value make_range(struct context* c, func_call tmp_f);
 /**
  * linspace(a, b, n) Create a list of n equally spaced real numbers starting at a and ending at b. This function must be called with three aguments unlike np.linspace. Note that the value b is included in the list
  */
-value make_linspace(struct context* c, cgs_func tmp_f);
+value make_linspace(struct context* c, func_call tmp_f);
 /**
  * Take a list value and flatten it so that it has numpy dimensions (n) where n is the sum of the length of each list in the base list. values are copied in order e.g flatten([0,1],[2,3]) -> [0,1,2,3]
- * cgs_func: the function with arguments passed
+ * func_call: the function with arguments passed
  */
-value flatten_list(struct context* c, cgs_func tmp_f);
+value flatten_list(struct context* c, func_call tmp_f);
 /**
  * Take a list value and flatten it so that it has numpy dimensions (n) where n is the sum of the length of each list in the base list. values are copied in order e.g flatten([0,1],[2,3]) -> [0,1,2,3]
- * cgs_func: the function with arguments passed
+ * func_call: the function with arguments passed
  */
-value concatenate(struct context* c, cgs_func tmp_f);
-value print(struct context* c, cgs_func tmp_f);
-value fun_sin(struct context* c, cgs_func tmp_f);
-value fun_cos(struct context* c, cgs_func tmp_f);
-value fun_tan(struct context* c, cgs_func tmp_f);
-value fun_exp(struct context* c, cgs_func tmp_f);
-value fun_sqrt(struct context* c, cgs_func tmp_f);
-value errtype(struct context* c, cgs_func tmp_f);
+value concatenate(struct context* c, func_call tmp_f);
+value print(struct context* c, func_call tmp_f);
+value fun_sin(struct context* c, func_call tmp_f);
+value fun_cos(struct context* c, func_call tmp_f);
+value fun_tan(struct context* c, func_call tmp_f);
+value fun_exp(struct context* c, func_call tmp_f);
+value fun_sqrt(struct context* c, func_call tmp_f);
+value errtype(struct context* c, func_call tmp_f);
 
 #endif //READ_H

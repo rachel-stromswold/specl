@@ -63,40 +63,36 @@ static inline char* strchr_block(char* str, char c) {
     stack(size_t) blk_stk = make_stack(size_t)();
     size_t j;
     for (size_t i = 0; str[i] != 0; ++i) {
-	if (str[i] == c && blk_stk.ptr == 0) {
-	    destroy_stack(size_t)(&blk_stk, NULL);
+	if (str[i] == c && blk_stk.ptr == 0)
 	    return str+i;
-	}
 	if (str[i] == '('/*)*/) {
-	    if ( push(size_t)(&blk_stk, i) ) goto exit;
+	    if ( push(size_t)(&blk_stk, i) ) return NULL;
 	} else if (str[i] == /*(*/')') {
-	    if ( pop(size_t)(&blk_stk, NULL) ) goto exit;
+	    if ( pop(size_t)(&blk_stk, NULL) ) return NULL;
 	} else if (str[i] == '['/*]*/) {
-	    if ( push(size_t)(&blk_stk, i) ) goto exit;
+	    if ( push(size_t)(&blk_stk, i) ) return NULL;
 	} else if (str[i] == /*[*/']') {
-	    if ( pop(size_t)(&blk_stk, NULL) ) goto exit;
+	    if ( pop(size_t)(&blk_stk, NULL) ) return NULL;
 	} else if (str[i] == '{'/*}*/) {
-	    if ( push(size_t)(&blk_stk, i) ) goto exit;
+	    if ( push(size_t)(&blk_stk, i) ) return NULL;
 	} else if (str[i] == /*{*/'}') {
-	    if ( pop(size_t)(&blk_stk, NULL) ) goto exit;
+	    if ( pop(size_t)(&blk_stk, NULL) ) return NULL;
 	} else if (str[i] == '\"'/*"*/) {
 	    //quotes are more complicated
 	    if (blk_stk.ptr > 0 && !peek(size_t)(&blk_stk, 1, &j) && str[j] == '\"') {
-		if ( pop(size_t)(&blk_stk, NULL) ) goto exit;
+		if ( pop(size_t)(&blk_stk, NULL) ) return NULL;
 	    } else {
-		if ( push(size_t)(&blk_stk, i) ) goto exit;
+		if ( push(size_t)(&blk_stk, i) ) return NULL;
 	    }
 	} else if (str[i] == '\''/*"*/) {
 	    //quotes are more complicated
 	    if (blk_stk.ptr > 0 && !peek(size_t)(&blk_stk, 1, &j) && str[j] == '\'') {
-		if ( pop(size_t)(&blk_stk, NULL) ) goto exit;
+		if ( pop(size_t)(&blk_stk, NULL) ) return NULL;
 	    } else {
-		if ( push(size_t)(&blk_stk, i) ) goto exit;
+		if ( push(size_t)(&blk_stk, i) ) return NULL;
 	    }
 	}
     }
-exit:
-    destroy_stack(size_t)(&blk_stk, NULL);
     return NULL;
 }
 
@@ -108,47 +104,43 @@ char* token_block(char* str, const char* comp) {
 	if (blk_stk.ptr == 0) {
 	    j = 0;
 	    while (comp[j] && str[i+j] && str[i+j] == comp[j]) ++j;
-	    if (comp[j] == 0 && is_token(str, i, j)) {
-		destroy_stack(size_t)(&blk_stk, NULL);
+	    if (comp[j] == 0 && is_token(str, i, j))
 		return str+i;
-	    }
 	}
 	if (str[i] == '('/*)*/) {
-	    if ( push(size_t)(&blk_stk, i) ) goto exit;
+	    if ( push(size_t)(&blk_stk, i) ) return NULL;
 	} else if (str[i] == /*(*/')') {
-	    if ( pop(size_t)(&blk_stk, NULL) ) goto exit;
+	    if ( pop(size_t)(&blk_stk, NULL) ) return NULL;
 	} else if (str[i] == '['/*]*/) {
-	    if ( push(size_t)(&blk_stk, i) ) goto exit;
+	    if ( push(size_t)(&blk_stk, i) ) return NULL;
 	} else if (str[i] == /*[*/']') {
-	    if ( pop(size_t)(&blk_stk, NULL) ) goto exit;
+	    if ( pop(size_t)(&blk_stk, NULL) ) return NULL;
 	} else if (str[i] == '{'/*}*/) {
-	    if ( push(size_t)(&blk_stk, i) ) goto exit;
+	    if ( push(size_t)(&blk_stk, i) ) return NULL;
 	} else if (str[i] == /*{*/'}') {
-	    if ( pop(size_t)(&blk_stk, NULL) ) goto exit;
+	    if ( pop(size_t)(&blk_stk, NULL) ) return NULL;
 	} else if (i > 0 && str[i-1] == '/' && str[i] == '*') {
-	    if ( push(size_t)(&blk_stk, i) ) goto exit;
+	    if ( push(size_t)(&blk_stk, i) ) return NULL;
 	} else if (i > 0 && str[i-1] == '*' && str[i] == '/') {
-	    if ( pop(size_t)(&blk_stk, NULL) ) goto exit;
+	    if ( pop(size_t)(&blk_stk, NULL) ) return NULL;
 	} else if (i > 0 && str[i-1] == '/' && str[i] == '/') {
-	    if ( push(size_t)(&blk_stk, i) ) goto exit;
+	    if ( push(size_t)(&blk_stk, i) ) return NULL;
 	} else if (str[i] == '\"'/*"*/) {
 	    //quotes are more complicated 
 	    if (blk_stk.ptr != 0 && !peek(size_t)(&blk_stk, 1, &j) && str[j] == '\"') {
-		if ( pop(size_t)(&blk_stk, NULL) ) goto exit;
+		if ( pop(size_t)(&blk_stk, NULL) ) return NULL;
 	    } else {
-		if ( push(size_t)(&blk_stk, i) ) goto exit;
+		if ( push(size_t)(&blk_stk, i) ) return NULL;
 	    }
 	} else if (str[i] == '\''/*"*/) {
 	    //quotes are more complicated
 	    if (blk_stk.ptr != 0 && !peek(size_t)(&blk_stk, 1, &j) && str[j] == '\'') {
-		if ( pop(size_t)(&blk_stk, NULL) ) goto exit;
+		if ( pop(size_t)(&blk_stk, NULL) ) return NULL;
 	    } else {
-		if ( push(size_t)(&blk_stk, i) ) goto exit;
+		if ( push(size_t)(&blk_stk, i) ) return NULL;
 	    }
 	}
     }
-exit:
-    destroy_stack(size_t)(&blk_stk, NULL);
     return NULL;
 }
 
@@ -260,11 +252,9 @@ char** csv_to_list(char* str, char sep, size_t* listlen) {
     if (j != 0) ret[off++] = saveptr;
     if (listlen) *listlen = off;
     ret[off] = NULL;
-    destroy_stack(blk_type)(&blk_stk, NULL);
     return ret;
 exit:
     free(ret);
-    destroy_stack(blk_type)(&blk_stk, NULL);
     return NULL;
 }
 
@@ -794,7 +784,7 @@ char lb_get(const line_buffer* lb, line_buffer_ind pos) {
 }
 
 /** ======================================================== builtin functions ======================================================== **/
-value check_signature(cgs_func f, size_t min_args, size_t max_args, const valtype* sig) {
+value check_signature(func_call f, size_t min_args, size_t max_args, const valtype* sig) {
     if (!sig || max_args < min_args)
 	return make_val_undef();
     if (f.n_args < min_args)
@@ -809,7 +799,7 @@ value check_signature(cgs_func f, size_t min_args, size_t max_args, const valtyp
     }
     return make_val_undef();
 }
-value get_type(struct context* c, cgs_func f) {
+value get_type(struct context* c, func_call f) {
     value sto;
     sto.type = VAL_STR;
     if (f.n_args < 1)
@@ -832,7 +822,7 @@ value get_type(struct context* c, cgs_func f) {
     sto.val.s = strdup(valnames[f.args[0].val.type]);
     return sto;
 }
-value make_range(struct context* c, cgs_func f) {
+value make_range(struct context* c, func_call f) {
     static const valtype RANGE_SIG[] = {VAL_NUM, VAL_NUM, VAL_NUM};
     value sto = check_signature(f, 1, SIGLEN(RANGE_SIG), RANGE_SIG);
     if (sto.type)
@@ -860,7 +850,7 @@ value make_range(struct context* c, cgs_func f) {
 	sto.val.a[i] = i*inc + min;
     return sto;
 }
-value make_linspace(struct context* c, cgs_func f) {
+value make_linspace(struct context* c, func_call f) {
     static const valtype LINSPACE_SIG[] = {VAL_NUM, VAL_NUM, VAL_NUM};
     value sto = check_signature(f, SIGLEN(LINSPACE_SIG), SIGLEN(LINSPACE_SIG), LINSPACE_SIG);
     if (sto.type)
@@ -878,7 +868,7 @@ value make_linspace(struct context* c, cgs_func f) {
     return sto;
 }
 STACK_DEF(value)
-value flatten_list(struct context* c, cgs_func f) {
+value flatten_list(struct context* c, func_call f) {
     static const valtype FLATTEN_LIST_SIG[] = {VAL_LIST};
     value sto = check_signature(f, SIGLEN(FLATTEN_LIST_SIG), SIGLEN(FLATTEN_LIST_SIG), FLATTEN_LIST_SIG);
     value cur_list = f.args[0].val;
@@ -897,16 +887,16 @@ value flatten_list(struct context* c, cgs_func f) {
     stack(value) lists = make_stack(value)();
     stack(size_t) inds = make_stack(size_t)();
     //just make sure that there's a root level on the stack to be popped out
-    if ( push(value)(&lists, cur_list) ) goto exit;
-    if ( push(size_t)(&inds, 0) ) goto exit;
+    if ( push(value)(&lists, cur_list) ) return sto;
+    if ( push(size_t)(&inds, 0) ) return sto;
     size_t j = 0;
     do {
 	size_t i = cur_st;
 	size_t start_depth = inds.ptr;
 	for (; i < cur_list.n_els; ++i) {
 	    if (cur_list.val.l[i].type == VAL_LIST) {
-		if ( push(value)(&lists, cur_list) ) goto exit;
-		if ( push(size_t)(&inds, i+1) ) goto exit;//push + 1 so that we start at the next index instead of reading the list again
+		if ( push(value)(&lists, cur_list) ) return sto;
+		if ( push(size_t)(&inds, i+1) ) return sto;//push + 1 so that we start at the next index instead of reading the list again
 		cur_list = cur_list.val.l[i];
 		cur_st = 0;
 		break;
@@ -919,7 +909,6 @@ value flatten_list(struct context* c, cgs_func f) {
 		    free(sto.val.l);
 		    cleanup_func(&f);
 		    destroy_stack(value)(&lists, &cleanup_val);
-		    destroy_stack(size_t)(&inds, NULL);
 		    return make_val_error(E_NOMEM, "");
 		}
 		sto.val.l = tmp_val;
@@ -934,13 +923,9 @@ value flatten_list(struct context* c, cgs_func f) {
     } while (lists.ptr);
     sto.type = VAL_LIST;
     sto.n_els = j;
-exit:
-    //the list stack only holds shallow copies, so we don't want to deallocate elements
-    destroy_stack(value)(&lists, NULL);
-    destroy_stack(size_t)(&inds, NULL);
     return sto;
 }
-value concatenate(struct context* c, cgs_func f) {
+value concatenate(struct context* c, func_call f) {
     value sto;
     if (f.n_args < 2)
 	return make_val_error(E_LACK_TOKENS, "cat() expected 2 arguments but got %lu", f.n_args);
@@ -1011,7 +996,7 @@ value concatenate(struct context* c, cgs_func f) {
 /**
  * print the elements to the console
  */
-value print(struct context* c, cgs_func f) {
+value print(struct context* c, func_call f) {
     value ret = make_val_undef();
     for (size_t i = 0; i < f.n_args; ++i) {
 	if (f.args[i].val.type == VAL_NUM) {
@@ -1028,7 +1013,7 @@ value print(struct context* c, cgs_func f) {
 /**
  * Make a vector argument with the x,y, and z coordinates supplied
  */
-value make_array(context* c, cgs_func f) {
+value make_array(context* c, func_call f) {
     static const valtype ARRAY_SIG[] = {VAL_LIST};
     value sto = check_signature(f, SIGLEN(ARRAY_SIG), SIGLEN(ARRAY_SIG), ARRAY_SIG);
     if (sto.type)
@@ -1061,7 +1046,7 @@ value make_array(context* c, cgs_func f) {
     return sto;
 }
 
-value make_vec(context* c, cgs_func f) {
+value make_vec(context* c, func_call f) {
     value sto = make_val_undef();
     //just copy the elements
     sto.type = VAL_ARRAY;
@@ -1155,7 +1140,7 @@ value make_val_list(const value* vs, size_t n_vs) {
     return v;
 }
 
-value make_val_func(const char* name, size_t n_args, value (*p_exec)(context*, cgs_func)) {
+value make_val_func(const char* name, size_t n_args, value (*p_exec)(context*, func_call)) {
     value ret;
     ret.type = VAL_FUNC;
     ret.n_els = n_args;
@@ -1697,16 +1682,16 @@ void val_exp(value* l, value r) {
 }
 
 
-/** ======================================================== cgs_func ======================================================== **/
+/** ======================================================== func_call ======================================================== **/
 
-void cleanup_func(cgs_func* f) {
+void cleanup_func(func_call* f) {
     if (f) {
 	for (size_t i = 0; i < f->n_args; ++i)
 	    cleanup_name_val_pair(f->args[i]);
     }
 }
-cgs_func copy_func(const cgs_func o) {
-    cgs_func f;f.name = NULL;
+func_call copy_func(const func_call o) {
+    func_call f;f.name = NULL;
     if (o.name) f.name = strdup(o.name);
     f.n_args = o.n_args;
     for (size_t i = 0; i < f.n_args; ++i) {
@@ -1715,7 +1700,7 @@ cgs_func copy_func(const cgs_func o) {
     }
     return f;
 }
-void swap_func(cgs_func* a, cgs_func* b) {
+void swap_func(func_call* a, func_call* b) {
     char* tmp_name = a->name;
     a->name = b->name;
     b->name = tmp_name;
@@ -1723,8 +1708,8 @@ void swap_func(cgs_func* a, cgs_func* b) {
     a->n_args = b->n_args;
     b->n_args = tmp_n_args;
     //WLOG fix sf and lf to be the pointers to the functions smaller and larger number of arguments respectively
-    cgs_func* sf = a;
-    cgs_func* lf = b;
+    func_call* sf = a;
+    func_call* lf = b;
     size_t min_n_args = a->n_args;
     size_t max_n_args = b->n_args;
     if (b->n_args < a->n_args) {
@@ -2255,8 +2240,8 @@ static inline value parse_list(struct context* c, char* str) {
     return sto;
 }
 
-cgs_func parse_func(struct context* c, char* token, long open_par_ind, value* v_er, char** end, int name_only) {
-    struct cgs_func f;
+func_call parse_func(struct context* c, char* token, long open_par_ind, value* v_er, char** end, int name_only) {
+    struct func_call f;
 
     //by default we want to indicate that we didn't get to the end
     if (end) *end = NULL;
@@ -2527,7 +2512,7 @@ static inline value parse_literal_func(struct context* c, char* str, int first_o
     for (size_t j = 0; j < first_open_ind && str[j]; ++j) {
 	if (is_whitespace(str[j]))
 	    continue;
-	cgs_func f;
+	func_call f;
 	//check to see if this is a function declaration, this must be handled differently
 	if (strncmp(str+j, "fun", KEY_DEF_LEN) == 0 &&
 	(is_whitespace(str[j+KEY_DEF_LEN]) || str[j+KEY_DEF_LEN] == '('/*)*/)) {
@@ -2770,7 +2755,7 @@ value read_from_lines(struct context* c, const line_buffer* b) {
 	char* dectype_start = token_block(line, "def");
 	if (dectype_start) {
 	    char* endptr;
-	    cgs_func cur_func = parse_func(c, dectype_start + KEY_DEF_LEN, -1, &er, &endptr, 1);
+	    func_call cur_func = parse_func(c, dectype_start + KEY_DEF_LEN, -1, &er, &endptr, 1);
 	    //jump ahead until after the end of the function
 	    if (er.type != VAL_ERR) {
 		size_t i = 0;
@@ -2813,14 +2798,14 @@ exit:
 
 /** ============================ user_func ============================ **/
 
-user_func* make_user_func_lb(cgs_func sig, line_buffer* b) {
+user_func* make_user_func_lb(func_call sig, line_buffer* b) {
     user_func* uf = (user_func*)malloc(sizeof(user_func));
     uf->code_lines = copy_line_buffer(b);
     uf->call_sig = copy_func(sig);
     uf->exec = NULL;
     return uf;
 }
-user_func* make_user_func_ex(value (*p_exec)(context*, cgs_func)) {
+user_func* make_user_func_ex(value (*p_exec)(context*, func_call)) {
     user_func* uf = (user_func*)malloc(sizeof(user_func));
     uf->code_lines = NULL;
     uf->call_sig.name = NULL;
@@ -2845,7 +2830,7 @@ void destroy_user_func(user_func* uf) {
 }
 /*const char* token_names[] = {"if", "for", "while", "return"};
 typedef enum {TOK_NONE, TOK_IF, TOK_FOR, TOK_WHILE, TOK_RETURN, N_TOKS} token_type;*/
-value uf_eval(user_func* uf, context* c, cgs_func call) {
+value uf_eval(user_func* uf, context* c, func_call call) {
     if (uf->exec) {
 	return (*uf->exec)(c, call);
     } else if (uf->call_sig.name && uf->call_sig.n_args > 0) {
