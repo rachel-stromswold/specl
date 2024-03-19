@@ -66,11 +66,11 @@ inline void* xrealloc(void* p, size_t nsize) {
 #define TYPED_A(NAME,TYPE) NAME##TYPE
 #define TYPED(NAME,TYPE) TYPED_A(NAME, _##TYPE)
 #define WRAP_MATH_FN(FN) value TYPED(fun,FN)(struct context* c, cgs_func f) {		\
-    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);	\
+    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG);	\
     if (sto.type == 0)									\
 	return make_val_num( FN(f.args[0].val.val.x) );					\
     cleanup_val(&sto);									\
-    sto = check_signature(f, SIGLEN(MATHA_SIG), SIGLEN(MATHA_SIG), MATHA_SIG, 0);	\
+    sto = check_signature(f, SIGLEN(MATHA_SIG), SIGLEN(MATHA_SIG), MATHA_SIG);		\
     if (sto.type == 0) {								\
 	sto.type = VAL_ARRAY;								\
 	sto.n_els = f.args[0].val.n_els;						\
@@ -598,10 +598,9 @@ value uf_eval(user_func* uf, context* c, cgs_func call);
  * min_args: f.n_args must be >= min_args or an error is returned
  * max_args: f.n_args must be <= max_args or an error is returned. Undefined behaviour may occur if max_args<min_args.
  * sig: the first f.n_args arguments in f (assuming min_args<=f.n_args<max_args) must match the specified signature. This array must be large enough to hold max_args
- * check_allocd: if true, test whether all types which use heap allocations have valid pointers
  * returns: an error with an appropriate message or undefined if there was no error
  */
-value check_signature(cgs_func f, size_t min_args, size_t max_args, const valtype* sig, int check_allocd);
+value check_signature(cgs_func f, size_t min_args, size_t max_args, const valtype* sig);
 /**
  * Get the type of a value
  */

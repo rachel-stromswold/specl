@@ -794,7 +794,7 @@ char lb_get(const line_buffer* lb, line_buffer_ind pos) {
 }
 
 /** ======================================================== builtin functions ======================================================== **/
-value check_signature(cgs_func f, size_t min_args, size_t max_args, const valtype* sig, int check_allocd) {
+value check_signature(cgs_func f, size_t min_args, size_t max_args, const valtype* sig) {
     if (!sig || max_args < min_args)
 	return make_val_undef();
     if (f.n_args < min_args)
@@ -804,7 +804,7 @@ value check_signature(cgs_func f, size_t min_args, size_t max_args, const valtyp
     for (size_t i = 0; i < f.n_args; ++i) {
 	if (sig[i] && f.args[i].val.type != sig[i])//treat undefined as allowing for arbitrary type
 	    return make_val_error(E_BAD_TYPE, "%s() expected args[%lu].type=%s, got %s", f.name, i, valnames[sig[i]], valnames[f.args[i].val.type]);
-	if (check_allocd && sig[i] > VAL_NUM && f.args[i].val.val.s == NULL)
+	if (sig[i] > VAL_NUM && f.args[i].val.val.s == NULL)
 	    return make_val_error(E_BAD_TYPE, "%s() found empty %s at args[%lu]", f.name, valnames[sig[i]], i);
     }
     return make_val_undef();
@@ -834,7 +834,7 @@ value get_type(struct context* c, cgs_func f) {
 }
 value make_range(struct context* c, cgs_func f) {
     static const valtype RANGE_SIG[] = {VAL_NUM, VAL_NUM, VAL_NUM};
-    value sto = check_signature(f, 1, SIGLEN(RANGE_SIG), RANGE_SIG, 0);
+    value sto = check_signature(f, 1, SIGLEN(RANGE_SIG), RANGE_SIG);
     if (sto.type)
 	return sto;
     double min, max, inc;
@@ -862,7 +862,7 @@ value make_range(struct context* c, cgs_func f) {
 }
 value make_linspace(struct context* c, cgs_func f) {
     static const valtype LINSPACE_SIG[] = {VAL_NUM, VAL_NUM, VAL_NUM};
-    value sto = check_signature(f, SIGLEN(LINSPACE_SIG), SIGLEN(LINSPACE_SIG), LINSPACE_SIG, 0);
+    value sto = check_signature(f, SIGLEN(LINSPACE_SIG), SIGLEN(LINSPACE_SIG), LINSPACE_SIG);
     if (sto.type)
 	return sto;
     sto.type = VAL_ARRAY;
@@ -880,7 +880,7 @@ value make_linspace(struct context* c, cgs_func f) {
 STACK_DEF(value)
 value flatten_list(struct context* c, cgs_func f) {
     static const valtype FLATTEN_LIST_SIG[] = {VAL_LIST};
-    value sto = check_signature(f, SIGLEN(FLATTEN_LIST_SIG), SIGLEN(FLATTEN_LIST_SIG), FLATTEN_LIST_SIG, 0);
+    value sto = check_signature(f, SIGLEN(FLATTEN_LIST_SIG), SIGLEN(FLATTEN_LIST_SIG), FLATTEN_LIST_SIG);
     value cur_list = f.args[0].val;
     //flattening an empty list is the identity op.
     if (cur_list.n_els == 0 || cur_list.val.l == NULL) {
@@ -1030,7 +1030,7 @@ value print(struct context* c, cgs_func f) {
  */
 value make_array(context* c, cgs_func f) {
     static const valtype ARRAY_SIG[] = {VAL_LIST};
-    value sto = check_signature(f, SIGLEN(ARRAY_SIG), SIGLEN(ARRAY_SIG), ARRAY_SIG, 0);
+    value sto = check_signature(f, SIGLEN(ARRAY_SIG), SIGLEN(ARRAY_SIG), ARRAY_SIG);
     if (sto.type)
 	return sto;
 
@@ -1092,63 +1092,6 @@ WRAP_MATH_FN(acos)
 WRAP_MATH_FN(atan)
 WRAP_MATH_FN(log)
 WRAP_MATH_FN(sqrt)
-/*value fun_sin(struct context* c, cgs_func f) {
-    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
-    if (sto.type == 0)
-	return make_val_num( sin(f.args[0].val.val.x) );
-    value sto = check_signature(f, SIGLEN(MATHA_SIG), SIGLEN(MATHA_SIG), MATHA_SIG, 0);
-    if (sto.type == 0)
-	return make_val_num( sin(f.args[0].val.val.x) );
-    return sto;
-}
-value fun_cos(struct context* c, cgs_func f) {
-    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
-    if (sto.type == 0)
-	return make_val_num( cos(f.args[0].val.val.x) );
-    return sto;
-}
-value fun_tan(struct context* c, cgs_func f) {
-    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
-    if (sto.type == 0)
-	return make_val_num( tan(f.args[0].val.val.x) );
-    return sto;
-}
-value fun_exp(struct context* c, cgs_func f) {
-    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
-    if (sto.type == 0)
-	return make_val_num( exp(f.args[0].val.val.x) );
-    return sto;
-}
-value fun_arcsin(struct context* c, cgs_func f) {
-    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
-    if (sto.type == 0)
-	return make_val_num( asin(f.args[0].val.val.x) );
-    return sto;
-}
-value fun_arccos(struct context* c, cgs_func f) {
-    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
-    if (sto.type == 0)
-	return make_val_num( acos(f.args[0].val.val.x) );
-    return sto;
-}
-value fun_arctan(struct context* c, cgs_func f) {
-    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
-    if (sto.type == 0)
-	return make_val_num( atan(f.args[0].val.val.x) );
-    return sto;
-}
-value fun_log(struct context* c, cgs_func f) {
-    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
-    if (sto.type == 0)
-	return make_val_num( log(f.args[0].val.val.x) );
-    return sto;
-}
-value fun_sqrt(struct context* c, cgs_func f) {
-    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG, 0);
-    if (sto.type == 0)
-	return make_val_num( sqrt(f.args[0].val.val.x) );
-    return sto;
-}*/
 
 /** ============================ struct value ============================ **/
 
