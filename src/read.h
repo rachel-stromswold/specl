@@ -13,17 +13,10 @@
 #define ERR_BSIZE	1024
 #define BUF_SIZE 	1024
 #define ARGS_BUF_SIZE 	256
-#define FUNC_BUF_SIZE 	256
 #define MAX_NUM_SIZE	10
-#define LINE_SIZE 	512
+#define LINE_SIZE 	128
 #define STACK_SIZE	8
-
-//keywords
-#define KEY_CLASS_LEN	5
-#define KEY_FOR_LEN	3
-#define KEY_DEF_LEN	3
-#define KEY_IN_LEN	2
-#define KEY_IF_LEN	2
+#define ALLOC_LST_N	16
 
 //easily find signature lengths
 #define SIGLEN(s)	(sizeof(s)/sizeof(valtype))
@@ -48,7 +41,7 @@ typedef unsigned int _uint;
 typedef unsigned char _uint8;
 
 typedef enum { E_SUCCESS, E_NOFILE, E_LACK_TOKENS, E_BAD_TOKEN, E_BAD_SYNTAX, E_BAD_VALUE, E_BAD_TYPE, E_NOMEM, E_NAN, E_UNDEF, E_OUT_OF_RANGE, N_ERRORS } parse_ercode;
-typedef enum {VAL_UNDEF, VAL_NUM, VAL_ERR, VAL_STR, VAL_ARRAY, VAL_MAT, VAL_LIST, VAL_FUNC, VAL_INST, N_VALTYPES} valtype;
+typedef enum {VAL_UNDEF, VAL_ERR, VAL_NUM, VAL_STR, VAL_ARRAY, VAL_MAT, VAL_LIST, VAL_FUNC, VAL_INST, N_VALTYPES} valtype;
 const char* const errnames[N_ERRORS] = {"SUCCESS", "FILE_NOT_FOUND", "LACK_TOKENS", "BAD_TOKEN", "BAD_SYNTAX", "BAD_VALUE", "BAD_TYPE", "NOMEM", "NAN", "UNDEF", "OUT_OF_BOUNDS"};
 const char* const valnames[N_VALTYPES] = {"undefined", "error", "string", "numeric", "array", "list", "function", "object"};
 //helper classes and things
@@ -211,11 +204,11 @@ typedef struct lbi {
 lbi make_lbi(size_t pl, size_t po);
 lbi lbi_add(lbi lhs, size_t rhs);
 lbi lbi_sub(lbi lhs, size_t rhs);
-int lbi_comp(lbi lhs, lbi rhs);
+int lbicmp(lbi lhs, lbi rhs);
 
 typedef struct line_buffer {
     char** lines;
-    size_t* line_sizes;
+    size_t* line_sizes;//length of each line buffer including null terminator
     size_t n_lines;
 } line_buffer;
 void destroy_line_buffer(line_buffer* lb);

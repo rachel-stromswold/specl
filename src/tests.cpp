@@ -31,7 +31,7 @@ TEST_CASE("value parsing") {
 	tmp_val = parse_value(sc, buf);
 	test_num(tmp_val, .25);
 	cleanup_val(&tmp_val);
-	strncpy(buf, "1.25", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	strncpy(buf, "+1.25", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
 	test_num(tmp_val, 1.25);
 	cleanup_val(&tmp_val);
@@ -44,9 +44,9 @@ TEST_CASE("value parsing") {
 	tmp_val = parse_value(sc, buf);
 	test_num(tmp_val, 1.25e10);
 	cleanup_val(&tmp_val);
-	strncpy(buf, "1.25e-10", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	strncpy(buf, "-1.25e-10", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
-	test_num(tmp_val, 1.25e-10);
+	test_num(tmp_val, -1.25e-10);
 	cleanup_val(&tmp_val);
     }
     SUBCASE("Reading strings to values works") {
