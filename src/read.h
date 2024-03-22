@@ -550,16 +550,6 @@ int lookup_float(const context* c, const char* str, double* sto);
  */
 void set_value(struct context* c, const char* name, value new_val, int copy);
 /**
- * Given the string starting at token, and the index of an open paren parse the result into a func_call struct.
- * token: a c-string which is modified in place that contains the function
- * open_par_ind: the location of the open parenthesis
- * f: the func_call that information should be saved to
- * end: If not NULL, a pointer to the first character after the end of the string is stored here. If an error occurred during parsing end will be set to NULL.
- * name_only: if set to true, then only the names of the function arguments will be set and all values will be set to undefined. This is useful for handling function declarations
- * returns: an errorcode if an invalid string was supplied.
- */
-func_call parse_func(struct context* c, char* token, long open_par_ind, value* v_er, char** end, int name_only);
-/**
  * Given a string str (which will be modified by this call), return a value corresponding to the expression str
  * c: the context to use when looking for variables and functions
  * str: the string expression to parse

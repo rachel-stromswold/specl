@@ -1055,7 +1055,7 @@ TEST_CASE("context lookups") {
 
 TEST_CASE("context parsing") {
     SUBCASE ("without nesting") {
-	const char* lines[] = { "a = 1", "\"b\"", "c = [\"d\", \"e\"]" }; 
+	const char* lines[] = { "a = 1", "\"b\"", " c = [\"d\", \"e\"]" }; 
 	size_t n_lines = sizeof(lines)/sizeof(char*);
 	line_buffer* b_1 = make_line_buffer_lines(lines, n_lines);
 	context* c = make_context(NULL);

@@ -204,22 +204,23 @@ int write_numeric(char* str, size_t n, double x) {
   * returns: the length of the string including the null terminator
   */
 static inline char* trim_whitespace(char* str, size_t* len) {
-    if (!str) return NULL;
-    size_t start_ind = 0;
+    if (!str)
+	return NULL;
     int started = 0;
     _uint last_non = 0;
     for (_uint i = 0; str[i]; ++i) {
         if (!is_whitespace(str[i])) {
             last_non = i;
-            if (!started) {
-                start_ind = i;
-		started = 1;
+            if (!started && i > 0) {
+		for (_uint j = 0; str[i+j]; ++j)
+		    str[j] = str[i+j];
             }
+	    started = 1;
         }
     }
     str[last_non+1] = 0;
-    if (len) *len = last_non - start_ind + 1;
-    return str+start_ind;
+    if (len) *len = last_non + 1;
+    return str;
 }
 
 char** csv_to_list(char* str, char sep, size_t* listlen) {
@@ -520,6 +521,14 @@ lbi lb_add(const line_buffer* lb, lbi lhs, size_t rhs) {
     lbi ret = make_lbi(lhs.line, lhs.off+rhs);
     if (ret.off <= lb->line_sizes[ret.line])
 	return ret;
+    do {
+	size_t rem = ret.off - lb->line_sizes[ret.line] - 1;
+	if (++ret.line >= lb->n_lines)
+	    return make_lbi(lb->n_lines, 0);
+	ret.off = rem;
+    } while(ret.off >= lb->line_sizes[ret.line]);
+    /*if (ret.off <= lb->line_sizes[ret.line])
+	return ret;
     //otherwise we have to move up a line
     size_t rem = ret.off - lb->line_sizes[ret.line];
     while (ret.off >= lb->line_sizes[ret.line]) {
@@ -528,7 +537,7 @@ lbi lb_add(const line_buffer* lb, lbi lhs, size_t rhs) {
 	if (++ret.line >= lb->n_lines)
 	    return make_lbi(lb->n_lines, 0);
 	rem = ret.off - lb->line_sizes[ret.line];
-    }
+    }*/
     return ret;
 }
 
@@ -1934,16 +1943,22 @@ static inline value parse_value_rs(context* c, read_state rs, lbi* new_end);
 value do_op(context* c, read_state rs, lbi op_loc) {
     value sto = make_val_undef();
     //some operators (==, >=, <=) take up more than one character, test for these
+    char op = lb_get(rs.b, op_loc);
+    char next = lb_get(rs.b, lb_add(rs.b, op_loc, 1));
     int op_width = 1;
-    if (lb_get(rs.b, lb_add(rs.b, op_loc, 1)) == '=')
+    /*if ((op == '=' || op == '>' || op == '<' || op == '+' || op == '-') && next == '=')
+	op_width = 2;*/
+    //the expressions +=, -=, *=, /=, ==, >=, and <= are all valid, ?=, and .= are not
+    if (op != '?' && op != '.' && next == '=')
 	op_width = 2;
-    char term_char = lb_get(rs.b, op_loc);
+    else if ((op == '|' || op == '&') && (next == op))
+	op_width == 2;
     //set a read state before the operator and after the operator
     read_state rs_l = rs;
     read_state rs_r = rs;
     rs_l.end = op_loc;
     rs_r.pos = lb_add(rs.b, op_loc, op_width);
-    if (term_char == '?') {
+    if (op == '?') {
 	//ternary operators and dereferences are special cases
 	//the colon must be present
 	char* col_loc = strchr_block(rs.b->lines[rs.pos.line], ':');
@@ -1964,7 +1979,7 @@ value do_op(context* c, read_state rs, lbi op_loc) {
 	    sto = parse_value_rs(c, rs_r, NULL);
 	    return sto;
 	}
-    } else if (term_char == '.') {
+    } else if (op == '.') {
 	//dereferencing subvariables
 	lbi s = find_token_before(rs.b, op_loc, rs.pos);
 	if (s.line != op_loc.line)
@@ -1973,12 +1988,12 @@ value do_op(context* c, read_state rs, lbi op_loc) {
 	if (inst_val.type != VAL_INST)
 	    return make_val_error(E_BAD_TYPE, "tried to find %s in non-instance type %s", lb_read(rs.b, op_loc), valnames[inst_val.type]);
 	return parse_value_rs(inst_val.val.c, rs_r, NULL);
-    } else if (term_char == '=' && op_width == 1) {
+    } else if (op == '=' && op_width == 1) {
 	//assignments
 	value tmp_val = parse_value_rs(c, rs_r, NULL);
 	if (tmp_val.type == VAL_ERR)
 	    return tmp_val;
-	char* str = lb_get_line(rs.b, rs_l.pos, rs_l.end, NULL);
+	char* str = trim_whitespace(lb_get_line(rs.b, rs_l.pos, rs_l.end, NULL), NULL);
 	set_value(c, str, tmp_val, 0);
 	free(str);
 	return make_val_undef();
@@ -1999,9 +2014,9 @@ value do_op(context* c, read_state rs, lbi op_loc) {
     sto.type = VAL_NUM;
     sto.n_els = 1;
     //handle equality comparisons
-    if (term_char == '=' && op_width == 2) {
+    if (op == '=' && op_width == 2) {
 	sto.val.x = (value_cmp(l, r) == 0);
-    } else if (term_char == '>') {
+    } else if (op == '>') {
 	int cmp = value_cmp(l, r);
 	if (cmp < -1) {
 	    sto = make_val_error(E_BAD_VALUE, "cannot compare types <%s> and <%s>", valnames[l.type], valnames[r.type]);
@@ -2011,7 +2026,7 @@ value do_op(context* c, read_state rs, lbi op_loc) {
 	    sto.val.x = (cmp >= 0);
 	else
 	    sto.val.x = (cmp > 0);
-    } else if (term_char == '<') {
+    } else if (op == '<') {
 	int cmp = value_cmp(l, r);
 	if (cmp < -1) {
 	    sto = make_val_error(E_BAD_VALUE, "cannot compare types <%s> and <%s>", valnames[l.type], valnames[r.type]);
@@ -2022,20 +2037,55 @@ value do_op(context* c, read_state rs, lbi op_loc) {
 	else
 	    sto.val.x = (cmp < 0);
     //handle arithmetic
-    } else if (term_char == '+') {
-        val_add(&l, r);
+    }/* else if (op == '+') {
+	if (next == '=') {
+	    val_add(c->table + tab_ind, r);
+	    l = c->table[tab_ind];
+	} else {
+	    val_add(&l, r);
+	}
 	goto finish_arith;
-    } else if (term_char == '-') {
-        val_sub(&l, r);
+    } else if (op == '-') {
+	if (next == '=') {
+	    val_sub(c->table + tab_ind, r);
+	    l = c->table[tab_ind];
+	} else {
+	    val_sub(&l, r);
+	}
 	goto finish_arith;
-    } else if (term_char == '*') {
-	if (lb_get(rs.b, lb_add(rs.b, op_loc, 1)) == '*')
+    } else if (op == '*') {
+	if (next == '*') {
 	    val_exp(&l, r);
-	else
+	} else if (next == '=') {
+	    val_mul(c->table + tab_ind, r);
+	    l = c->table[tab_ind];
+	} else {
 	    val_mul(&l, r);
+	}
 	goto finish_arith;
-    } else if (term_char == '/') {
-	val_div(&l, r);
+    } else if (op == '/') {
+	if (next == '=') {
+	    val_div(c->table + tab_ind, r);
+	    l = c->table[tab_ind];
+	} else {
+	    val_div(&l, r);
+	}
+	goto finish_arith;
+    }*/
+    else {
+	switch(op) {
+	case '+': val_add(&l, r);break;
+	case '-': val_sub(&l, r);break;
+	case '*': if (next == '*') { val_exp(&l, r); } else { val_mul(&l, r); }break;
+	case '/': val_div(&l, r);break;
+	}
+	//if this is a relative assignment, do that
+	if (next == '=') {
+	    char* str = trim_whitespace(lb_get_line(rs.b, rs_l.pos, rs_l.end, NULL), NULL);
+	    set_value(c, str, l, 0);
+	    free(str);
+	    l = make_val_undef();
+	}
 	goto finish_arith;
     }
 finish:
@@ -2203,9 +2253,7 @@ static inline struct for_state make_for_state(context* c, read_state rs, lbi for
     //the variable name is whatever is in between the "for" and the "in"
     while (is_whitespace(lb_get(rs.b, after_for)))
 	after_for = lb_add(rs.b, after_for, 1);
-    fs.var_name = lb_get_line(rs.b, after_for, fs.in_start, NULL);
-    trim_whitespace(fs.var_name, &n);
-    fs.var_name[n] = 0;
+    fs.var_name = trim_whitespace(lb_get_line(rs.b, after_for, fs.in_start, NULL), NULL);
     //now parse the list we iterate over
     lbi after_in = lb_add(rs.b, fs.in_start, strlen("in"));
     fs.it_list = parse_value_rs(c, make_read_state(rs.b, after_in, rs.end), NULL);
@@ -2234,76 +2282,6 @@ static inline void finish_for_state(context* c, struct for_state fs) {
     c->table[fs.var_ind] = fs.prev;
     //free the memory from the iteration list
     cleanup_val(&fs.it_list);
-}
-
-func_call parse_func(struct context* c, char* token, long open_par_ind, value* v_er, char** end, int name_only) {
-    struct func_call f;
-
-    //by default we want to indicate that we didn't get to the end
-    if (end) *end = NULL;
-    f.n_args = 0;
-    //infer the location of the open paren index if the user didn't specify it
-    if (open_par_ind < 0 || token[open_par_ind] != '('/*)*/) {
-	char* par_char = strchr(token, '('/*)*/);
-	//make sure there actually is an open paren
-	if (!par_char) {
-	    *v_er = make_val_error(E_BAD_SYNTAX, "expected ("/*)*/);
-	    return f;
-	}
-	open_par_ind = par_char - token;
-    }
-
-    //break the string up at the parenthesis and remove surrounding whitespace
-    token[open_par_ind] = 0;
-    size_t n;
-    f.name = trim_whitespace(token, &n);
-    f.name[n] = 0;
-
-    //now remove whitespace from the ends of the string
-    char* arg_str = token+open_par_ind+1;
-    //make sure that the string is null terminated
-    char* term_ptr = strchr_block(arg_str, /*(*/')');
-    if (!term_ptr) {
-	*v_er = make_val_error(E_BAD_SYNTAX, /*(*/"expected )");
-	return f;
-    }
-    *term_ptr = 0;
-    if (end) *end = term_ptr+1;
- 
-    //read the arguments separated by spaces
-    char** list_els = csv_to_list(arg_str, ',', &(f.n_args));
-    if (!list_els) {
-	*v_er = make_val_error(E_BAD_SYNTAX, "couldn't parse function signature");
-	return f;
-    }
-    //make sure that we don't go out of bounds
-    if (f.n_args >= ARGS_BUF_SIZE) {
-	*v_er = make_val_error(E_OUT_OF_RANGE, "too many arguments");
-	free(list_els);
-	return f;
-    }
-    if (name_only) {
-	for (size_t i = 0; list_els[i] && i < f.n_args; ++i) {
-	    f.args[i].name = strdup(list_els[i]);
-	    f.args[i].val = make_val_undef();
-	}
-    } else {
-	for (size_t i = 0; list_els[i] && i < f.n_args; ++i) {
-	    //handle named arguments
-	    char* eq_loc = strchr_block(list_els[i], '=');
-	    if (eq_loc) {
-		*eq_loc = 0;
-		f.args[i].name = strdup(list_els[i]);
-		list_els[i] = eq_loc+1;
-	    } else {
-		f.args[i].name = NULL;
-	    }
-	    f.args[i].val = parse_value(c, list_els[i]);
-	}
-    }
-    //cleanup and reset the string
-    free(list_els);
-    return f;
 }
 
 /**
@@ -2516,7 +2494,12 @@ static inline lbi* csv_to_inds(const line_buffer* lb, lbi open_ind, lbi close_in
 	}
 	inds[i++] = s;
     }
-    if (n_inds) *n_inds = i;
+    if (i == 0) {
+	free(inds);
+	*n_inds = 0;
+	return NULL;
+    }
+    *n_inds = i-1;
     return inds;
 }
 
@@ -2529,11 +2512,11 @@ static inline value inds_to_nvp(context* c, const line_buffer* lb, name_val_pair
     size_t n_init = *n;
     //we setup inds such that consecutive indices give strings to read
     size_t j = 0;
-    for (size_t i = 0; i < n_init && i+1 < ARGS_BUF_SIZE; ++i) {
-	lbi eq_loc = strchr_block_rs(lb, inds[i], inds[i+1], '=');
+    for (size_t i = 0; i < n_init; ++i) {
+	lbi eq_loc = strchr_block_rs(lb, lb_add(lb, inds[i], 1), inds[i+1], '=');
 	//if there is an '=' sign read the name
 	if (lbicmp(eq_loc, inds[i+1]) < 0) {
-	    sto[j].name = lb_get_line(lb, lb_add(lb, inds[i], 1), inds[i+1], NULL);
+	    sto[j].name = trim_whitespace(lb_get_line(lb, lb_add(lb, inds[i], 1), eq_loc, NULL), NULL);
 	    sto[j].val = parse_value_rs(c, make_read_state(lb, lb_add(lb, eq_loc, 1), inds[i+1]), NULL);
 	} else {
 	    sto[j].name = NULL;
@@ -2567,7 +2550,6 @@ static inline value parse_literal_func(struct context* c, read_state rs, lbi ope
     lbi* arg_inds = csv_to_inds(rs.b, open_ind, close_ind, &f.n_args);
     if (f.n_args == 0)
 	return make_val_error(E_BAD_SYNTAX, "overlapping parentheses (something really weird happened)");
-    f.n_args -= 1;
     if (f.n_args >= ARGS_BUF_SIZE)
 	return make_val_error(E_OUT_OF_RANGE, "speclang only supports at most %lu arguments in functions", ARGS_BUF_SIZE-1);
     //set up a function and figure out the function name 
@@ -2614,7 +2596,6 @@ static inline value parse_literal_table(struct context* c, read_state rs, lbi op
     lbi* inds = csv_to_inds(rs.b, open_ind, close_ind, &ret.n_els);
     if (ret.n_els == 0)
 	return make_val_error(E_BAD_SYNTAX, "overlapping parentheses (something really weird happened)");
-    ret.n_els -= 1;
     //allocate memory to hold the nvps
     name_val_pair* nvps = malloc(sizeof(name_val_pair)*ret.n_els);
     ret.val.c = make_context(c);
@@ -2669,21 +2650,20 @@ static inline value parse_value_rs(struct context* c, read_state rs, lbi* new_en
 	size_t reset_ind = 0;
 	//if there isn't a valid parenthetical expression, then we should interpret this as a variable
 	if (lbicmp(open_ind, rs.end) == 0 || lbicmp(close_ind, rs.end) == 0) {
-	    char* str = lb_get_line(rs.b, rs.pos, rs.end, NULL);
-	    char* str2 = trim_whitespace(str, &reset_ind);
+	    char* str = trim_whitespace(lb_get_line(rs.b, rs.pos, rs.end, NULL), &reset_ind);
 	    //ensure that empty strings return undefined
-	    if (str2[0] == 0) {
+	    if (str[0] == 0) {
 		free(str);
 		return make_val_undef();
 	    }
-	    sto = lookupn(c, str2, reset_ind);
+	    sto = lookupn(c, str, reset_ind);
 	    if (sto.type == VAL_UNDEF) {
 		//try interpreting as a number
 		errno = 0;
-		sto.val.x = strtod(str2, NULL);
+		sto.val.x = strtod(str, NULL);
 		sto.n_els = 1;
 		if (errno) {
-		    sto = make_val_error(E_UNDEF, "undefined token %s", str2);
+		    sto = make_val_error(E_UNDEF, "undefined token %s", str);
 		    free(str);
 		    return sto;
 		}
@@ -2738,115 +2718,6 @@ static inline void destroy_read_state(read_state rs) {
     free(rs.buf);
 }
 
-/**helper function for read_from lines that reads a single line
- */
-static inline value read_single_line(context* c, read_state* rs) {
-    //tracking variables
-    size_t len = lb_get_line_size(rs->b, rs->pos.line);
-    size_t k = 0;
-    int started = 0;
-    char* lval = NULL;
-    size_t rval_ind = 0;
-    lbi init = rs->pos;
-    for (rs->pos.off = 0;; ++rs->pos.off) {
-	//make sure the buffer is large enough
-	if (k >= rs->buf_size) {
-	    rs->buf_size *= 2;
-	    char* tmp = realloc(rs->buf, sizeof(char)*rs->buf_size);
-	    if (!tmp) return make_val_error(E_NOMEM, "");
-	    rs->buf = tmp;
-	}
-	//exit the loop when we reach the end, but make sure to include whatever parts haven't already been included
-	if (rs->pos.off >= len || lb_get(rs->b, rs->pos) == 0) {
-	    rs->buf[k] = 0;
-	    break;
-	}
-	//ignore preceeding whitespace
-	if (lb_get(rs->b, rs->pos) != ' ' || lb_get(rs->b, rs->pos) != '\t' || lb_get(rs->b, rs->pos) != '\n')
-	    started = 1;
-	if (started) {
-	    //handle comments
-	    if (lb_get(rs->b, rs->pos) == '/' && rs->pos.off > 0 && lb_get(rs->b, lb_sub(rs->b, rs->pos, 1)) == '/') {
-		//we don't care about lines that only contain comments, so we should skip over them, but in the other event we need to skip to the end of the line
-		if (k == 1)
-		    started = 0;
-		else
-		    rs->pos.off = lb_get_line_size(rs->b, rs->pos.line);
-		//terminate the expression and move to the next line
-		rs->buf[--k] = 0;
-		break;
-	    } else if (lb_get(rs->b, rs->pos) == '*' && rs->pos.off > 0 && lb_get(rs->b, lb_sub(rs->b, rs->pos, 1)) == '/') {
-		if (k == 1)
-		    started = 0;
-		rs->buf[--k] = 0;//set the slash to be a null terminator
-		rs->pos = lb_add(rs->b, rs->pos, 1);
-		while (rs->pos.line < rs->b->n_lines) {
-		    if (lb_get(rs->b, rs->pos) == '*' && lb_get(rs->b, lb_add(rs->b, rs->pos, 1)) == '/') {
-			rs->pos = lb_add(rs->b, rs->pos, 2);
-			break;
-		    }
-		}
-	    }
-	    //handle assignments
-	    if (lb_get(rs->b, rs->pos) == '=') {
-		rs->buf[k++] = 0;
-		lval = trim_whitespace(rs->buf, NULL);
-		init.off = k;
-		//buf_off = k;
-		rval_ind = k;
-		continue;//don't copy the value into rs->buf
-	    }
-	    //if we encounter a block, then we need to make sure we include all of its contents, even if that block ends on another line
-	    char match_tok = 0;
-	    switch(lb_get(rs->b, rs->pos)) {
-		case '(': match_tok = ')';break;
-		case '[': match_tok = ']';break;
-		case '{': match_tok = '}';break;
-		case '\"': match_tok = '\"';break;
-		case '\'': match_tok = '\'';break;
-		default: break;
-	    }
-	    if (match_tok) {
-		lbi end;
-		line_buffer* enc = lb_get_enclosed(rs->b, rs->pos, &end, lb_get(rs->b, rs->pos), match_tok, 1, 1);
-		size_t tmp_len;
-		char* tmp = lb_flatten(enc, ' ', &tmp_len);
-		destroy_line_buffer(enc);
-		//if we're still on the same line, then we need to continue until we reach the end. Otherwise, save everything inclosed and terminate
-		if (end.line == init.line && end.off < len) {
-		    rs->buf = append_to_line(rs->buf, &k, &rs->buf_size, tmp, end.off - rs->pos.off);
-		    rs->pos = end;
-		    init = rs->pos;
-		    free(tmp);
-		    //continue;//don't copy the value into rs->buf
-		} else {
-		    rs->buf = append_to_line(rs->buf, &k, &rs->buf_size, tmp, tmp_len);
-		    free(tmp);
-		    rs->pos = end;
-		    break;//we're done reading this line since we jumped across a line
-		}
-	    }
-	    //handle everything else
-	    rs->buf[k++] = lb_get(rs->b, rs->pos);
-	}
-    }
-    //only set the rval if we haven't done so already
-    if (started) {
-	value tmp_val = parse_value(c, rs->buf+rval_ind);
-	if (tmp_val.type == VAL_ERR)
-	    return tmp_val;
-	//only append assignments
-	if (lval)
-	    set_value(c, lval, tmp_val, 0);
-	else
-	    cleanup_val(&tmp_val);
-    } else {
-	rs->pos.line += 1;
-	rs->pos.off = 0;
-    }
-    return make_val_undef();
-}
-
 value read_from_lines(struct context* c, const line_buffer* b) {
     value er = make_val_undef();
 
@@ -2858,9 +2729,11 @@ value read_from_lines(struct context* c, const line_buffer* b) {
 	er = parse_value_rs(c, rs, &end);
 	if (er.type == VAL_ERR) {
 	    destroy_read_state(rs);
+	    if (c->parent == NULL)
+		fprintf(stderr, "Error %s (line %lu): %s\n", errnames[er.val.e->c], rs.pos.line, er.val.e->msg);
 	    return er;
 	}
-	rs.pos = lb_add(b, rs.pos, 1);
+	rs.pos = lb_add(b, end, 1);
     }
     return er;
 }
