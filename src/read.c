@@ -51,14 +51,21 @@ static inline char get_match(char s) {
 
 /**
  * Helper function that finds the start of first token before the index s in the read state rs. The returned value is greater than or equal to zero.
+ * lb: the line buffer to read from
+ * s: the current position
+ * stop: do not return any tokens before this index
  */
-static inline lbi find_token_before(read_state rs, lbi s) {
-    while (lbicmp(rs.pos, s)) {
-	lb_sub(rs.b, s, 1);
-	if (is_char_sep(lb_get(rs.b, s)) || (rs.pos.line == 0 && rs.pos.off ==0))
+static inline lbi find_token_before(const line_buffer* lb, lbi s, lbi stop) {
+    int started = 0;
+    while (lbicmp(s, stop) > 0) {
+	s = lb_sub(lb, s, 1);
+	char c = lb_get(lb, s);
+	if (!is_whitespace(c))
+	    started = 1;
+	if ((!started && is_char_sep(c)) || (s.line == 0 && s.off ==0))
 	    return s;
     }
-    return s;
+    return stop;
 }
 
 /**
@@ -210,6 +217,7 @@ static inline char* trim_whitespace(char* str, size_t* len) {
             }
         }
     }
+    str[last_non+1] = 0;
     if (len) *len = last_non - start_ind + 1;
     return str+start_ind;
 }
@@ -529,7 +537,7 @@ lbi lb_sub(const line_buffer* lb, lbi lhs, size_t rhs) {
     if (lhs.line >= lb->n_lines)
 	lhs.line = lb->n_lines-1;
     //if we stay on the current line we don't need to worry about overflows
-    if (lhs.off > rhs)
+    if (lhs.off >= rhs)
 	return make_lbi(lhs.line, lhs.off-rhs);
     lbi ret = make_lbi(lhs.line, lhs.off);
     while (rhs > ret.off) {
@@ -538,6 +546,8 @@ lbi lb_sub(const line_buffer* lb, lbi lhs, size_t rhs) {
 	rhs -= lhs.off;
 	ret.off = lb->line_sizes[--ret.line];
     }
+    if (ret.off >= rhs)
+	ret.off -= rhs;
     return ret;
 }
 
@@ -761,9 +771,9 @@ static inline const char* lb_read(const line_buffer* lb, lbi s) {
     return lb->lines[s.line]+s.off;
 }
 
-char* lb_get_line(const line_buffer* lb, lbi b, lbi e) {
-    while (is_whitespace(lb_get(lb, b)))
-	b = lb_add(lb, b, 1);
+char* lb_get_line(const line_buffer* lb, lbi b, lbi e, size_t* n) {
+    /*while (is_whitespace(lb_get(lb, b)))
+	b = lb_add(lb, b, 1);*/
     if (b.line >= lb->n_lines) {
         return NULL;
     }
@@ -773,13 +783,14 @@ char* lb_get_line(const line_buffer* lb, lbi b, lbi e) {
 	tot_size += lb->line_sizes[b.line];
     tot_size = tot_size;
     //allocate it and copy
-    char* ret = (char*)malloc(sizeof(char)*tot_size);
+    char* ret = malloc(sizeof(char)*tot_size);
     size_t wi = 0;
-    do {
+    while (lbicmp(b,e) < 0 && wi < tot_size) {
 	ret[wi++] = lb_get(lb, b);
 	b = lb_add(lb, b, 1);
-    } while (lbicmp(b,e) < 0 && wi < tot_size);
+    }
     ret[wi] = 0;
+    if (n) *n = wi;
     return ret;
 }
 
@@ -1807,11 +1818,11 @@ static inline size_t fnv_1(const char* str, size_t n, unsigned char t_bits) {
  * ind: the location where we find the matching index
  * returns: 1 if a match was found, 0 otherwise
  */
-static inline int find_ind(const struct context* c, const char* name, size_t* ind) {
-    size_t ii = fnv_1(name, SIZE_MAX, c->t_bits);
+static inline int find_ind(const struct context* c, const char* name, size_t n, size_t* ind) {
+    size_t ii = fnv_1(name, n, c->t_bits);
     size_t i = ii;
     while (c->table[i].name) {
-	if (strcmp(name, c->table[i].name) == 0) {
+	if (strncmp(name, c->table[i].name, n) == 0) {
 	    *ind = i;
 	    return 1;
 	}
@@ -1829,11 +1840,11 @@ static inline int find_ind(const struct context* c, const char* name, size_t* in
  */
 static inline value lookupn(const struct context* c, const char* str, size_t n) {
     size_t i;
-    if (find_ind(c, str, &i))
+    if (find_ind(c, str, n, &i))
 	return c->table[i].val;
     //try searching through the parent if that didn't work
     if (c->parent)
-	return lookup(c->parent, str);
+	return lookupn(c->parent, str, n);
     //reaching this point in execution means the matching entry wasn't found
     return make_val_undef();
 }
@@ -1861,7 +1872,7 @@ static inline int grow_context(struct context* c) {
 		continue;
 	    //only move non-null members
 	    size_t new_ind;
-	    if (!find_ind(&nc, c->table[i].name, &new_ind))
+	    if (!find_ind(&nc, c->table[i].name, SIZE_MAX, &new_ind))
 		++nc.n_memb;
 	    nc.table[new_ind] = c->table[i];
 	}
@@ -1919,7 +1930,7 @@ void destroy_context(struct context* c) {
 }
 
 //forward declare so that helpers can call
-static inline value parse_value_rs(context* c, read_state rs);
+static inline value parse_value_rs(context* c, read_state rs, lbi* new_end);
 value do_op(context* c, read_state rs, lbi op_loc) {
     value sto = make_val_undef();
     //some operators (==, >=, <=) take up more than one character, test for these
@@ -1939,45 +1950,45 @@ value do_op(context* c, read_state rs, lbi op_loc) {
 	if (!col_loc)
 	    return make_val_error(E_BAD_SYNTAX, "expected ':' in ternary");
 
-	value l = parse_value_rs(c, rs_l);
+	value l = parse_value_rs(c, rs_l, NULL);
 	if (l.type == VAL_ERR)
 	    return l;
 	//0 branch
 	if (l.type == VAL_UNDEF || l.val.x == 0) {
 	    rs_r.pos.off = col_loc - rs.b->lines[rs.pos.line] + 1;
-	    sto = parse_value_rs(c, rs_r);
+	    sto = parse_value_rs(c, rs_r, NULL);
 	    return sto;
 	} else {
 	    //1 branch
 	    rs_r.end.off = col_loc - rs.b->lines[rs.pos.line];
-	    sto = parse_value_rs(c, rs_r);
+	    sto = parse_value_rs(c, rs_r, NULL);
 	    return sto;
 	}
     } else if (term_char == '.') {
 	//dereferencing subvariables
-	lbi s = find_token_before(rs, op_loc);
+	lbi s = find_token_before(rs.b, op_loc, rs.pos);
 	if (s.line != op_loc.line)
 	    return make_val_error(E_BAD_SYNTAX, "unexpected line break");
 	value inst_val = lookupn(c, lb_read(rs.b, s), op_loc.off - s.off);
 	if (inst_val.type != VAL_INST)
 	    return make_val_error(E_BAD_TYPE, "tried to find %s in non-instance type %s", lb_read(rs.b, op_loc), valnames[inst_val.type]);
-	return parse_value_rs(inst_val.val.c, rs_r);
+	return parse_value_rs(inst_val.val.c, rs_r, NULL);
     } else if (term_char == '=' && op_width == 1) {
 	//assignments
-	value tmp_val = parse_value_rs(c, rs_r);
+	value tmp_val = parse_value_rs(c, rs_r, NULL);
 	if (tmp_val.type == VAL_ERR)
 	    return tmp_val;
-	char* str = lb_get_line(rs.b, rs_l.pos, rs_l.end);
+	char* str = lb_get_line(rs.b, rs_l.pos, rs_l.end, NULL);
 	set_value(c, str, tmp_val, 0);
 	free(str);
 	return make_val_undef();
     }
 
     //parse right and left values
-    value l = parse_value_rs(c, rs_l);
+    value l = parse_value_rs(c, rs_l, NULL);
     if (l.type == VAL_ERR)
 	return l;
-    value r = parse_value_rs(c, rs_r);
+    value r = parse_value_rs(c, rs_r, NULL);
     if (r.type == VAL_ERR) {
 	cleanup_val(&l);
 	return r;
@@ -2011,7 +2022,7 @@ value do_op(context* c, read_state rs, lbi op_loc) {
 	else
 	    sto.val.x = (cmp < 0);
     //handle arithmetic
-    } else if (term_char == '+' && (op_loc.off > 0 && lb_get(rs.b, lb_sub(rs.b, op_loc, 1)) == 'e')) {
+    } else if (term_char == '+') {
         val_add(&l, r);
 	goto finish_arith;
     } else if (term_char == '-') {
@@ -2067,7 +2078,7 @@ void setup_builtins(struct context* c) {
 
 value lookup(const struct context* c, const char* str) {
     size_t i;
-    if (find_ind(c, str, &i))
+    if (find_ind(c, str, SIZE_MAX, &i))
 	return c->table[i].val;
     //try searching through the parent if that didn't work
     if (c->parent)
@@ -2146,10 +2157,10 @@ void set_value(struct context* c, const char* p_name, value p_val, int copy) {
 	return set_value(c, tmp, p_val, copy);
     }
     size_t ti = fnv_1(p_name, SIZE_MAX, c->t_bits);
-    if (!find_ind(c, p_name, &ti)) {
+    if (!find_ind(c, p_name, SIZE_MAX, &ti)) {
 	//if there isn't already an element with that name we have to expand the table and add a member
 	if (grow_context(c))
-	    find_ind(c, p_name, &ti);
+	    find_ind(c, p_name, SIZE_MAX, &ti);
 	c->table[ti].name = strdup(p_name);
 	c->table[ti].val = (copy)? copy_val(p_val) : p_val;
 	++c->n_memb;
@@ -2190,12 +2201,14 @@ static inline struct for_state make_for_state(context* c, read_state rs, lbi for
 	return fs;
     }
     //the variable name is whatever is in between the "for" and the "in"
-    fs.var_name = lb_get_line(rs.b, after_for, fs.in_start);
+    while (is_whitespace(lb_get(rs.b, after_for)))
+	after_for = lb_add(rs.b, after_for, 1);
+    fs.var_name = lb_get_line(rs.b, after_for, fs.in_start, NULL);
     trim_whitespace(fs.var_name, &n);
     fs.var_name[n] = 0;
     //now parse the list we iterate over
     lbi after_in = lb_add(rs.b, fs.in_start, strlen("in"));
-    fs.it_list = parse_value_rs(c, make_read_state(rs.b, after_in, rs.end));
+    fs.it_list = parse_value_rs(c, make_read_state(rs.b, after_in, rs.end), NULL);
     if (fs.it_list.type == VAL_ERR) {
 	*er = make_val_error(E_BAD_SYNTAX, "in expression %s", rs.b->lines[after_in.line]+after_in.off);
 	free(fs.var_name);
@@ -2208,7 +2221,7 @@ static inline struct for_state make_for_state(context* c, read_state rs, lbi for
     }
     fs.expr_name = make_read_state(rs.b, lb_add(rs.b, rs.pos, 1), fs.for_start);
     //we need to add a variable with the appropriate name to loop over. We write a value and save the value there before so we can remove it when we're done
-    find_ind(c, fs.var_name, &(fs.var_ind));
+    find_ind(c, fs.var_name, SIZE_MAX, &(fs.var_ind));
     fs.prev = c->table[fs.var_ind];
     c->table[fs.var_ind].name = fs.var_name;
     *er = make_val_undef();
@@ -2300,12 +2313,11 @@ func_call parse_func(struct context* c, char* token, long open_par_ind, value* v
  * close_ind: store the location of the last escaping block
  * returns: the index of the first expression or 0 in the event of an error (it is impossible for a valid expression to have an operator as the first character)
  */
-static inline value find_operator(read_state rs, lbi* op_loc, lbi* first_open_ind, lbi* last_close_ind) {
+static inline value find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind, lbi* new_end) {
     *op_loc = rs.end;
-    *first_open_ind = rs.end;*last_close_ind = rs.end;
+    *open_ind = rs.end;*close_ind = rs.end;
     //keeps track of open and close [], (), {}, and ""
     stack(char) blk_stk = make_stack(char)();
-    blk_type start_ind;
     //variable names are not allowed to start with '+', '-', or a digit and may not contain any '.' symbols. Use this to check whether the value is numeric
     char open_type, prev;
     char cur = lb_get(rs.b, rs.pos);
@@ -2321,22 +2333,22 @@ static inline value find_operator(read_state rs, lbi* op_loc, lbi* first_open_in
 	if (cur == '[' || cur == '(' || cur == '{') {
 	    push(char)(&blk_stk, cur);
 	    //only set the open index if this is the first match
-	    if (lbicmp(*first_open_ind, rs.end) == 0) *first_open_ind = rs.pos;
+	    if (lbicmp(*open_ind, rs.end) == 0) *open_ind = rs.pos;
 	} else if (cur == '}' || cur == ')' || cur == ']') {
 	    if (pop(char)(&blk_stk, &open_type) || cur != get_match(open_type)) {
 		destroy_stack(char)(&blk_stk, NULL);
 		return make_val_error(E_BAD_SYNTAX, "unexpected %c", cur);
 	    }
-	    *last_close_ind = rs.pos;
+	    *close_ind = rs.pos;
 	} else if (cur == '\"' && (prev != '\\')) {
 	    if (peek(char)(&blk_stk, 1, &open_type) || cur != get_match(open_type)) {
 		//quotes need to be handled in a special way
 		push(char)(&blk_stk, cur);
 		//only set the open index if this is the first match
-		if (lbicmp(*first_open_ind, rs.end) == 0) *first_open_ind = rs.pos;
+		if (lbicmp(*open_ind, rs.end) == 0) *open_ind = rs.pos;
 	    } else {
-		pop(char)(&blk_stk, &start_ind);
-		*last_close_ind = rs.pos;
+		pop(char)(&blk_stk, &open_type);
+		*close_ind = rs.pos;
 	    }
 	} else if (cur == '/') {
 	    //ignore everything after a comment
@@ -2347,16 +2359,16 @@ static inline value find_operator(read_state rs, lbi* op_loc, lbi* first_open_in
 	}
 
 	if (blk_stk.ptr == 0) {
-	    //check if we found a comparison operation symbol
-	    /*if (((cur == '=' && next == '=') || cur == '>' || cur == '<') && op_prec < 5) {
-		op_prec = 5;
-		*op_loc = rs.pos;*/
+	    //check for operations with higher priorities (higher priorities indicated by op_prec are executed later)
 	    if (cur == '=' && next != '=' && op_prec < 6) {
 		op_prec = 6;
 		*op_loc = rs.pos;
-	    } else if (((cur == '=' && next == '=') || cur == '>' || cur == '<') && op_prec < 5){
+	    } else if (((cur == '=' && next == '=') || cur == '>' || cur == '<') && op_prec < 5) {
 		op_prec = 5;
 		*op_loc = rs.pos;
+		//if this is a two character sequence like ==, >=, or <= we need to skip the next sign
+		if (next == '=')
+		    rs.pos = lb_add(rs.b, rs.pos, 1);
 	    } else if ((cur == '+' || cur == '-') && prev != 'e' && prev != 0 && op_prec < 4) {
 		//remember to recurse after we finish looping
 		op_prec = 4;
@@ -2370,6 +2382,8 @@ static inline value find_operator(read_state rs, lbi* op_loc, lbi* first_open_in
 	    } else if (op_prec < 1 && (cur == '?' || (cur == '.' && !is_numeric))) {
 		op_prec = 1;
 		*op_loc = rs.pos;
+	    } else if (cur == ';') {
+		*new_end = rs.pos;
 	    }
 	}
     }
@@ -2382,27 +2396,12 @@ static inline value find_operator(read_state rs, lbi* op_loc, lbi* first_open_in
     return make_val_undef();
 }
 
-// helper for parse_value to handle numeric literals
-// helper for parse_value to handle numeric literals
-static inline value parse_literal_string(char* str, size_t first_open_ind, size_t last_close_ind) {
-    value sto;
-    //this is a string
-    sto.type = VAL_STR;
-    sto.n_els = last_close_ind-first_open_ind;
-    //allocate memory and copy
-    sto.val.s = malloc(sizeof(char)*sto.n_els);
-    for (size_t j = 0; j < sto.n_els-1; ++j)
-	sto.val.s[j] = str[first_open_ind+j+1];
-    sto.val.s[sto.n_els-1] = 0;
-    return sto;
-}
-
 //helper for parse_value to hand list literals
 static inline value parse_literal_list(struct context* c, read_state rs, lbi open_ind, lbi close_ind) {
     //if the string is empty then we're creating a new list, otherwise we're accessing an existing list
     if (lbicmp(rs.pos, open_ind) < 0) {
 	//check if this is actually dereferencing from a list. this technically isn't a literal so I lied
-	lbi s = find_token_before(rs, open_ind);
+	lbi s = find_token_before(rs.b, open_ind, rs.pos);
 	if (s.line != open_ind.line)
 	    return make_val_error(E_BAD_SYNTAX, "unexpected line break");
 	value lst = lookupn(c, rs.b->lines[s.line], open_ind.off-s.off);
@@ -2410,7 +2409,7 @@ static inline value parse_literal_list(struct context* c, read_state rs, lbi ope
 	    cleanup_val(&lst);
 	    return make_val_error(E_BAD_TYPE, "tried to index from non list type %s", valnames[lst.type]);
 	}
-	value contents = parse_value_rs(c, make_read_state(rs.b, lb_add(rs.b, open_ind, 1), close_ind));
+	value contents = parse_value_rs(c, make_read_state(rs.b, lb_add(rs.b, open_ind, 1), close_ind), NULL);
 	//check that we found the list and that it was valid
 	if (contents.type != VAL_NUM) {
 	    cleanup_val(&contents);
@@ -2438,20 +2437,20 @@ static inline value parse_literal_list(struct context* c, read_state rs, lbi ope
     value* lbuf;
     //check if this is a list interpretation
     lbi for_start = token_block(rs.b, lb_add(rs.b, open_ind, 1), close_ind, "for", strlen("for"));
-    if (lbicmp(for_start, close_ind)) {
+    if (lbicmp(for_start, close_ind) < 0) {
 	struct for_state fs = make_for_state(c, rs, for_start, &sto);
 	if (sto.type == VAL_ERR)
 	    return sto;
 	//setup a buffer to hold the list
 	sto.n_els = fs.it_list.n_els;
-	lbuf = (value*)calloc(sto.n_els, sizeof(value));
+	lbuf = calloc(sto.n_els, sizeof(value));
 	//we now iterate through the list specified, substituting VAL in the expression with the current value
 	for (size_t i = 0; i < sto.n_els; ++i) {
 	    if (fs.it_list.type == VAL_LIST)
 		c->table[fs.var_ind].val = fs.it_list.val.l[i];
 	    else if (fs.it_list.type == VAL_ARRAY)
 		c->table[fs.var_ind].val = make_val_num(fs.it_list.val.a[i]);
-	    lbuf[i] = parse_value_rs(c, fs.expr_name);
+	    lbuf[i] = parse_value_rs(c, fs.expr_name, NULL);
 	    if (lbuf[i].type == VAL_ERR) {
 		value ret = copy_val(lbuf[i]);
 		for (size_t j = 0; j < i; ++j)
@@ -2463,6 +2462,7 @@ static inline value parse_literal_list(struct context* c, read_state rs, lbi ope
 	}
 	finish_for_state(c, fs);
     } else {
+	//TODO: figure out how to avoid code duplication with parse_literal_func
 	size_t alloc_n = ALLOC_LST_N;
 	lbuf = malloc(sizeof(value)*alloc_n);
 	sto.n_els = 0;
@@ -2477,13 +2477,15 @@ static inline value parse_literal_list(struct context* c, read_state rs, lbi ope
 		if (!lbuf)
 		    return make_val_error(E_NOMEM, "");
 	    }
-	    lbuf[sto.n_els] = parse_value_rs(c, make_read_state(rs.b, s, e));
+	    lbuf[sto.n_els] = parse_value_rs(c, make_read_state(rs.b, s, e), NULL);
 	    if (lbuf[sto.n_els].type == VAL_ERR) {
 		sto = copy_val(lbuf[sto.n_els]);
 		free(lbuf);
 		return sto;
 	    }
-	    sto.n_els++;
+	    //only include defined values
+	    if (lbuf[sto.n_els].type != VAL_UNDEF)
+		sto.n_els++;
 	}
     }
     //set number of elements and type
@@ -2492,119 +2494,173 @@ static inline value parse_literal_list(struct context* c, read_state rs, lbi ope
     return sto;
 }
 
-//parse table declaration statements
-static inline value parse_literal_table(struct context* c, char* str, size_t first_open_ind, size_t last_close_ind) {
-    return make_val_undef();
-    //now parse the argument as a context
-    /*size_t n_els;
-    str[last_close_ind] = 0;
-    char** list_els = csv_to_list(str+first_open_ind+1, ',', &n_els);
-    if (!list_els)
-	return make_val_error(E_BAD_SYNTAX, "couldn't parse list");
-    //setup the context
-    value sto;
-    sto.val.c = make_context(c);
-    sto.n_els = n_els;
-    //insert context members
-    for (size_t j = 0; list_els[j] && j < n_els; ++j) {
-	char* cur_name = NULL;
-	char* rval = list_els[j];
-	char* eq_loc = strchr_block(list_els[j], '=');
-	if (eq_loc) {
-	    *eq_loc = 0;
-	    cur_name = trim_whitespace(list_els[j], NULL);
-	    rval = eq_loc+1;
+/**
+ * Given a read state, read a list of each occurrence of a comma separator between open_ind and close_ind.
+ * returns: a list of the location of each comma and the open and close brace. If the returned value is called args, then the characters between (args[i], args[i+1]) (non-inclusive) give the ith string
+ */
+static inline lbi* csv_to_inds(const line_buffer* lb, lbi open_ind, lbi close_ind, size_t* n_inds) {
+    //get a list of each argument index plus an additional token at the end.
+    size_t alloc_n = ALLOC_LST_N;
+    lbi* inds = malloc(sizeof(lbi)*alloc_n);
+    size_t i = 0;
+    lbi e = open_ind;
+    lbi s = e;
+    while (lbicmp(s, close_ind) < 0) {
+	s = e;
+	e = strchr_block_rs(lb, lb_add(lb, s, 1), close_ind, ',');
+	if (i+1 == alloc_n) {
+	    alloc_n *= 2;
+	    inds = realloc(inds, sizeof(lbi)*alloc_n);
+	    if (!inds)
+		return NULL;
 	}
-	value tmp = parse_value(sto.val.c, rval);
-	if (tmp.type == VAL_ERR) {
-	    free(list_els);
-	    return tmp;
-	}
-	set_value(sto.val.c, cur_name, tmp, 1);
-	cleanup_val(&tmp);
+	inds[i++] = s;
     }
-    free(list_els);
-    sto.type = VAL_INST;
-    return sto;*/
+    if (n_inds) *n_inds = i;
+    return inds;
+}
+
+/**
+ * Read the name value pairs separated by an '=' character from the strings in inds to sto. The caller must ensure that *n is the length of inds and sto has enough allocated memory to hold *n-1 elements. Save the number of elements written to n
+ */
+static inline value inds_to_nvp(context* c, const line_buffer* lb, name_val_pair* sto, lbi* inds, size_t* n) {
+    if (!n)
+	return make_val_error(E_BAD_VALUE, "tried to read NULL");
+    size_t n_init = *n;
+    //we setup inds such that consecutive indices give strings to read
+    size_t j = 0;
+    for (size_t i = 0; i < n_init && i+1 < ARGS_BUF_SIZE; ++i) {
+	lbi eq_loc = strchr_block_rs(lb, inds[i], inds[i+1], '=');
+	//if there is an '=' sign read the name
+	if (lbicmp(eq_loc, inds[i+1]) < 0) {
+	    sto[j].name = lb_get_line(lb, lb_add(lb, inds[i], 1), inds[i+1], NULL);
+	    sto[j].val = parse_value_rs(c, make_read_state(lb, lb_add(lb, eq_loc, 1), inds[i+1]), NULL);
+	} else {
+	    sto[j].name = NULL;
+	    sto[j].val = parse_value_rs(c, make_read_state(lb, lb_add(lb, inds[i], 1), inds[i+1]), NULL);
+	}
+	//check for errors
+	if (sto[i].val.type == VAL_ERR) {
+	    value er = copy_val(sto[i].val);
+	    return er;
+	}
+	//only include defined values in the argument list
+	if (sto[j].val.type != VAL_UNDEF)
+	    ++j;
+    }
+    *n = j;
+    return make_val_undef();
 }
 
 //parse function definition/call statements
-static inline value parse_literal_func(struct context* c, char* str, size_t first_open_ind, size_t last_close_ind) {
+static inline value parse_literal_func(struct context* c, read_state rs, lbi open_ind, lbi close_ind, lbi* new_end) {
+    //check if this is a parenthetical expression
+    while ( is_whitespace(lb_get(rs.b, rs.pos)) && lbicmp(rs.pos, open_ind) )
+	rs.pos = lb_add(rs.b, rs.pos, 1);
+    if (lbicmp(rs.pos, open_ind) == 0)
+	return parse_value_rs(c, make_read_state(rs.b, lb_add(rs.b, open_ind, 1), close_ind), NULL);
     value sto = make_val_undef();
-    //check to see if this is a function call (it is if there are any non-whitespace characters before the open paren
-    for (size_t j = 0; j < first_open_ind && str[j]; ++j) {
-	if (is_whitespace(str[j]))
-	    continue;
-	func_call f;
-	//check to see if this is a function declaration, this must be handled differently
-	if (strncmp(str+j, "fun", strlen("fun")) == 0 &&
-	(is_whitespace(str[j+strlen("fun")]) || str[j+strlen("fun")] == '('/*)*/)) {
-	    char* f_end;
-	    f = parse_func(c, str, first_open_ind, &sto, &f_end, 1);
-	    if (sto.type == VAL_ERR)
-		return sto;
-	    //find the contents in the curly brace and separate by semicolons
-	    line_buffer* b = make_line_buffer_sep(f_end, ';');
-	    sto.type = VAL_FUNC;
-	    sto.n_els = f.n_args;
-	    lbi start, end;
-	    start = make_lbi(0, j);
-	    sto.val.f = make_user_func_lb(f, lb_get_enclosed(b, start, &end, '{', '}', 0, 0));
+    rs.end = close_ind;
+
+    //read the indices
+    func_call f;
+    lbi* arg_inds = csv_to_inds(rs.b, open_ind, close_ind, &f.n_args);
+    if (f.n_args == 0)
+	return make_val_error(E_BAD_SYNTAX, "overlapping parentheses (something really weird happened)");
+    f.n_args -= 1;
+    if (f.n_args >= ARGS_BUF_SIZE)
+	return make_val_error(E_OUT_OF_RANGE, "speclang only supports at most %lu arguments in functions", ARGS_BUF_SIZE-1);
+    //set up a function and figure out the function name 
+    lbi s = find_token_before(rs.b, open_ind, rs.pos);
+    if (s.line != open_ind.line)
+	return make_val_error(E_BAD_SYNTAX, "unexpected line break");
+    size_t name_len;
+    f.name = lb_get_line(rs.b, s, open_ind, &name_len);
+    //check if this is a declaration
+    lbi func_start = token_block(rs.b, rs.pos, open_ind, "func", strlen("func"));
+    if (lbicmp(func_start, open_ind) < 0) {
+	//handle function declarations
+	sto.type = VAL_FUNC;
+	sto.n_els = f.n_args;
+	//we setup arg_inds such that consecutive indices give strings to read
+	for (size_t i = 0; i < f.n_args && i+1 < ARGS_BUF_SIZE; ++i)
+	    f.args[i].name = lb_get_line(rs.b, lb_add(rs.b, arg_inds[i], 1), arg_inds[i+1], NULL);
+	sto.val.f = make_user_func_lb(f, lb_get_enclosed(rs.b, close_ind, new_end, '{', '}', 0, 0));
+    } else {
+	//handle function calls
+	value func_val = lookupn(c, f.name, name_len);
+	if (func_val.type != VAL_FUNC) {
 	    cleanup_func(&f);
-	    destroy_line_buffer(b);
-	    return sto;
-	} else {
-	    //we can't leave this as zero in case the user needs to do some more operations
-	    str[last_close_ind+1] = 0;
-	    f = parse_func(c, str, first_open_ind, &sto, NULL, 0);
-	    if (sto.type == VAL_ERR)
-		return sto;
-	    //otherwise lookup the function
-	    value func_val = lookup(c, f.name);
-	    if (func_val.type == VAL_FUNC) {
-		//make sure that the function was found and that sufficient arguments were provided
-		if (func_val.n_els <= f.n_args) {
-		    sto = uf_eval(func_val.val.f, c, f);
-		} else {
-		    str[first_open_ind] = 0;
-		    sto = make_val_error(E_LACK_TOKENS, "Error: unrecognized function name %s\n", f.name);
-		    str[first_open_ind] = '(';//)
-		}
-	    } else {
-		str[first_open_ind] = 0;
-		sto = make_val_error(E_BAD_TYPE, "Error: unrecognized function name %s\n", f.name);
-		str[first_open_ind] = '(';//);
-	    }
+	    free(arg_inds);
+	    return make_val_error(E_LACK_TOKENS, "unrecognized function name %s\n", f.name);
+	}
+	sto = inds_to_nvp(c, rs.b, f.args, arg_inds, &f.n_args);
+	if (sto.type == VAL_ERR) {
 	    cleanup_func(&f);
+	    free(arg_inds);
 	    return sto;
 	}
+	sto = uf_eval(func_val.val.f, c, f);
     }
-    //otherwise interpret this as a parenthetical expression
-    str[last_close_ind] = 0;
-    size_t reset_ind;
-    char* tmp_str = trim_whitespace(str+first_open_ind+1, &reset_ind);
-    sto = parse_value(c, tmp_str);
-    tmp_str[reset_ind] = ' ';
-    str[first_open_ind] = '(';
-    str[last_close_ind] = ')';
+    cleanup_func(&f);
+    free(arg_inds);
     return sto;
 }
 
-static inline value parse_value_rs(struct context* c, read_state rs) {
+//parse table declaration statements
+static inline value parse_literal_table(struct context* c, read_state rs, lbi open_ind, lbi close_ind) {
+    value ret;
+    //read the indices
+    lbi* inds = csv_to_inds(rs.b, open_ind, close_ind, &ret.n_els);
+    if (ret.n_els == 0)
+	return make_val_error(E_BAD_SYNTAX, "overlapping parentheses (something really weird happened)");
+    ret.n_els -= 1;
+    //allocate memory to hold the nvps
+    name_val_pair* nvps = malloc(sizeof(name_val_pair)*ret.n_els);
+    ret.val.c = make_context(c);
+    if (!nvps || !ret.val.c)
+	return make_val_error(E_NOMEM, "");
+    //read each value
+    value er = inds_to_nvp(c, rs.b, nvps, inds, &ret.n_els);
+    if (er.type == VAL_ERR) {
+	destroy_context(ret.val.c);
+	free(inds);
+	return er;
+    }
+    //transfer each value
+    for (size_t i = 0; i < ret.n_els; ++i) {
+	set_value(ret.val.c, nvps[i].name, nvps[i].val, 0);
+	free(nvps[i].name);
+    }
+    ret.type = VAL_INST;
+    free(nvps);
+    free(inds);
+    return ret;
+}
+
+/**
+ * Parse a value from the line buffer rs.b
+ * c: the context to use for function calls and variables etc.
+ * rs: the current state to read, includes the buffer and the start and end indices
+ * new_end: if non-null, save the last character read when parsing this line
+ */
+static inline value parse_value_rs(struct context* c, read_state rs, lbi* new_end) {
+    if (new_end)
+	*new_end = rs.end;
     value sto = make_val_undef();
     //iterate until we hit a non whitespace character
     while (is_whitespace(lb_get(rs.b, rs.pos))) {
 	//if we hit the end of the line without non-whitespace then return an undefined value
 	rs.pos = lb_add(rs.b, rs.pos, 1);
-	if (lbicmp(rs.pos, rs.end) == 0)
+	if (lbicmp(rs.pos, rs.end) >= 0)
 	    return sto;
     }
     if (lbicmp(rs.pos,rs.end) == 0)
 	return sto;
 
     //store locations of the first instance of different operators. We do this so we can quickly look up new operators if we didn't find any other operators of a lower precedence (such operators are placed in the tree first).
-    lbi first_open_ind, last_close_ind, op_loc;
-    sto = find_operator(rs, &op_loc, &first_open_ind, &last_close_ind);
+    lbi open_ind, close_ind, op_loc;
+    sto = find_operator(rs, &op_loc, &open_ind, &close_ind, new_end);
     if (sto.type == VAL_ERR)
 	return sto;
 
@@ -2612,37 +2668,37 @@ static inline value parse_value_rs(struct context* c, read_state rs) {
     if (lbicmp(op_loc, rs.end) >= 0) {
 	size_t reset_ind = 0;
 	//if there isn't a valid parenthetical expression, then we should interpret this as a variable
-	if (lbicmp(first_open_ind, rs.end) == 0 || lbicmp(last_close_ind, rs.end) == 0) {
-	    char* str = trim_whitespace(rs.b->lines[rs.pos.line]+rs.pos.off, &reset_ind);
+	if (lbicmp(open_ind, rs.end) == 0 || lbicmp(close_ind, rs.end) == 0) {
+	    char* str = lb_get_line(rs.b, rs.pos, rs.end, NULL);
+	    char* str2 = trim_whitespace(str, &reset_ind);
 	    //ensure that empty strings return undefined
-	    if (str[0] == 0)
+	    if (str2[0] == 0) {
+		free(str);
 		return make_val_undef();
-	    sto = lookupn(c, str, reset_ind);
+	    }
+	    sto = lookupn(c, str2, reset_ind);
 	    if (sto.type == VAL_UNDEF) {
 		//try interpreting as a number
 		errno = 0;
-		str[reset_ind] = 0;
-		sto.val.x = strtod(str, NULL);
+		sto.val.x = strtod(str2, NULL);
 		sto.n_els = 1;
-		if (errno)
-		    return make_val_error(E_UNDEF, "undefined token %s", str);
+		if (errno) {
+		    sto = make_val_error(E_UNDEF, "undefined token %s", str2);
+		    free(str);
+		    return sto;
+		}
 		sto.type = VAL_NUM;
-		//all whitespace is treated identically so it doesn't matter
-		str[reset_ind] = ' ';
-	    }
-	    sto = copy_val(sto); 
-	} else {
-	    size_t open = lb_diff(rs.b, first_open_ind, rs.pos);
-	    size_t close = lb_diff(rs.b, last_close_ind, rs.pos);
-	    char* str = lb_get_line(rs.b, rs.pos, lb_add(rs.b, last_close_ind, 1));
-	    //if there are enclosed blocks then we need to read those
-	    switch (lb_get(rs.b, first_open_ind)) {
-	    case '\"': return parse_literal_string(str, open, close);break; //"
-	    case '[':  return parse_literal_list(c, rs, first_open_ind, last_close_ind);break; //]
-	    case '{':  return parse_literal_table(c, str, open, close);break; //}
-	    case '(':  return parse_literal_func(c, str, open, close);break; //)
 	    }
 	    free(str);
+	    sto = copy_val(sto); 
+	} else {
+	    //if there are enclosed blocks then we need to read those
+	    switch (lb_get(rs.b, open_ind)) {
+	    case '\"': sto.type = VAL_STR; sto.val.s = lb_get_line(rs.b, lb_add(rs.b, open_ind, 1), close_ind, &sto.n_els);sto.n_els += 1;break; //"
+	    case '[':  return parse_literal_list(c, rs, open_ind, close_ind);break; //]
+	    case '{':  return parse_literal_table(c, rs, open_ind, close_ind);break; //}
+	    case '(':  return parse_literal_func(c, rs, open_ind, close_ind, new_end);break; //)
+	    }
 	}
     } else {
 	return do_op(c, rs, op_loc);
@@ -2663,12 +2719,16 @@ value parse_value(context* c, char* str) {
     rs.pos = make_lbi(0,0);
     rs.end = make_lbi(0, rs.b->line_sizes[0]);
 
-    return parse_value_rs(c, rs);
+    return parse_value_rs(c, rs, NULL);
 }
 
 static inline read_state make_read_state_lb(const line_buffer* pb) {
     read_state ret;
     ret.pos = make_lbi(0,0);
+    if (pb->n_lines == 0)
+	ret.end = make_lbi(0,0);
+    else
+	ret.end = make_lbi(0, pb->line_sizes[0]);
     ret.b = pb;
     ret.buf_size = BUF_SIZE;
     ret.buf = (char*)calloc(ret.buf_size, sizeof(char));
@@ -2790,28 +2850,18 @@ static inline value read_single_line(context* c, read_state* rs) {
 value read_from_lines(struct context* c, const line_buffer* b) {
     value er = make_val_undef();
 
+    lbi end;
     read_state rs = make_read_state_lb(b);
-    char* line = NULL;
     //iterate over each line in the file
-    while (1) {
-	if(line) free(line);
-	line = lb_get_line(b, rs.pos, rs.pos);
-	er = read_single_line(c, &rs);
+    while (rs.pos.line < b->n_lines) {
+	rs.end = make_lbi(rs.pos.line, b->line_sizes[rs.pos.line]);
+	er = parse_value_rs(c, rs, &end);
 	if (er.type == VAL_ERR) {
-	    if (c->parent == NULL) fprintf(stderr, "Error on line %lu: %s\n", rs.pos.line, er.val.e->msg);
-	    goto exit;
+	    destroy_read_state(rs);
+	    return er;
 	}
-
-	//if we're at the end of a line, try incrementing. If that doesn't work, then we've reached the end of the file.
-	if (rs.pos.off >= lb_get_line_size(rs.b, rs.pos.line)) {
-	    rs.pos = lb_add(b, rs.pos, 1);
-	    if (rs.pos.line == rs.b->n_lines)
-		break;
-	}
+	rs.pos = lb_add(b, rs.pos, 1);
     }
-exit:
-    free(line);
-    destroy_read_state(rs);
     return er;
 }
 

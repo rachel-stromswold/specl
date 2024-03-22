@@ -43,7 +43,7 @@ typedef unsigned char _uint8;
 typedef enum { E_SUCCESS, E_NOFILE, E_LACK_TOKENS, E_BAD_TOKEN, E_BAD_SYNTAX, E_BAD_VALUE, E_BAD_TYPE, E_NOMEM, E_NAN, E_UNDEF, E_OUT_OF_RANGE, N_ERRORS } parse_ercode;
 typedef enum {VAL_UNDEF, VAL_ERR, VAL_NUM, VAL_STR, VAL_ARRAY, VAL_MAT, VAL_LIST, VAL_FUNC, VAL_INST, N_VALTYPES} valtype;
 const char* const errnames[N_ERRORS] = {"SUCCESS", "FILE_NOT_FOUND", "LACK_TOKENS", "BAD_TOKEN", "BAD_SYNTAX", "BAD_VALUE", "BAD_TYPE", "NOMEM", "NAN", "UNDEF", "OUT_OF_BOUNDS"};
-const char* const valnames[N_VALTYPES] = {"undefined", "error", "string", "numeric", "array", "list", "function", "object"};
+const char* const valnames[N_VALTYPES] = {"undefined", "error", "numeric", "string", "array", "list", "function", "object"};
 //helper classes and things
 typedef enum {BLK_UNDEF, BLK_MISC, BLK_INVERT, BLK_TRANSFORM, BLK_DATA, BLK_ROOT, BLK_COMPOSITE, BLK_FUNC_DEC, BLK_LITERAL, BLK_COMMENT, BLK_SQUARE, BLK_QUOTE, BLK_QUOTE_SING, BLK_PAREN, BLK_CURLY, N_BLK_TYPES} blk_type;
 
@@ -248,7 +248,7 @@ lbi lb_jmp_enclosed(line_buffer* lb, lbi start, char start_delim, char end_delim
  * e: read up to this character unless e <= b in which case reading goes to the end of the line
  * returns: a string with the contents between b and e. This string should be freed with a call to free().
  */
-char* lb_get_line(const line_buffer* lb, lbi b, lbi e);
+char* lb_get_line(const line_buffer* lb, lbi b, lbi e, size_t* len);
 /**
  * Return the size of the line with index i.
  */
