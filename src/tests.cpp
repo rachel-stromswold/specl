@@ -5,6 +5,12 @@ extern "C" {
 #include "read.h"
 }
 
+bool spcl_true(value v) {
+    if (v.type != VAL_NUM || v.val.x == 0)
+	return false;
+    return true;
+}
+
 void test_num(value v, double x) {
     CHECK(v.type == VAL_NUM);
     CHECK(v.val.x == x);
@@ -417,36 +423,34 @@ TEST_CASE("operations") {
     }
     SUBCASE("Comparisons work") {
 	//create a single true and false, this makes things easier
-	value false_res = make_val_num(0);
-	value true_res = make_val_num(1);
         strncpy(buf, "2 == 2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	value tmp_val = parse_value(sc, buf);
         CHECK(tmp_val.type != VAL_ERR);
-        CHECK(value_cmp(tmp_val, true_res) == 0);
+        CHECK(spcl_true(tmp_val));
         strncpy(buf, "1 == 2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
         CHECK(tmp_val.type != VAL_ERR);
-        CHECK(value_cmp(tmp_val, false_res) == 0);
+        CHECK(!spcl_true(tmp_val));
         strncpy(buf, "[2, 3] == [2, 3]", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
         CHECK(tmp_val.type != VAL_ERR);
-        CHECK(value_cmp(tmp_val, true_res) == 0);
+        CHECK(spcl_true(tmp_val));
         strncpy(buf, "[2, 3, 4] == [2, 3]", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
         CHECK(tmp_val.type != VAL_ERR);
-        CHECK(value_cmp(tmp_val, false_res) == 0);
+        CHECK(!spcl_true(tmp_val));
         strncpy(buf, "[2, 3, 4] == [2, 3, 5]", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
         CHECK(tmp_val.type != VAL_ERR);
-        CHECK(value_cmp(tmp_val, false_res) == 0);
+        CHECK(!spcl_true(tmp_val));
         strncpy(buf, "\"apple\" == \"apple\"", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
         CHECK(tmp_val.type != VAL_ERR);
-        CHECK(value_cmp(tmp_val, true_res) == 0);
+        CHECK(spcl_true(tmp_val));
         strncpy(buf, "\"apple\" == \"banana\"", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
         CHECK(tmp_val.type != VAL_ERR);
-        CHECK(value_cmp(tmp_val, false_res) == 0);
+        CHECK(!spcl_true(tmp_val));
     }
     SUBCASE("String concatenation works") {
         //single operations
@@ -457,6 +461,76 @@ TEST_CASE("operations") {
 	CHECK(tmp_val.n_els == 7);
         cleanup_val(&tmp_val);
 	CHECK(tmp_val.n_els == 0);
+    }
+    SUBCASE("comparisons work") {
+	//equality
+	strncpy(buf, "1 == 1", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	value tmp = parse_value(sc, buf);
+	CHECK(spcl_true(tmp));
+	strncpy(buf, "1 == 2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(!spcl_true(tmp));
+	//geq
+	strncpy(buf, "1 >= 1", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(tmp.type == VAL_NUM);
+	CHECK(spcl_true(tmp));
+	//greater than
+	strncpy(buf, "1 > 1", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(!spcl_true(tmp));
+	strncpy(buf, "-1 > 1", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(!spcl_true(tmp));
+	//leq
+	strncpy(buf, "1 <= 1", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(spcl_true(tmp));
+	//less than
+	strncpy(buf, "1 < 2", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(spcl_true(tmp));
+	strncpy(buf, "1 < 1", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(!spcl_true(tmp));
+	strncpy(buf, "1 < -1", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(!spcl_true(tmp));
+    }
+    SUBCASE("boolean operations work") {
+	//or
+	strncpy(buf, "false || false", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	value tmp = parse_value(sc, buf);
+	CHECK(!spcl_true(tmp));
+	strncpy(buf, "true || false", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(spcl_true(tmp));
+	strncpy(buf, "false || true", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(spcl_true(tmp));
+	strncpy(buf, "true || true", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(spcl_true(tmp));
+	//and
+	strncpy(buf, "false && false", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(!spcl_true(tmp));
+	strncpy(buf, "true && false", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(!spcl_true(tmp));
+	strncpy(buf, "false && true", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(!spcl_true(tmp));
+	strncpy(buf, "true && true", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(spcl_true(tmp));
+	//not
+	strncpy(buf, "!false", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(spcl_true(tmp));
+	strncpy(buf, "!true", BUF_SIZE);buf[BUF_SIZE-1] = 0;
+	tmp = parse_value(sc, buf);
+	CHECK(!spcl_true(tmp));
     }
     SUBCASE("Ternary operators work") {
 	strncpy(buf, "(false) ? 100 : 200", BUF_SIZE);buf[BUF_SIZE-1] = 0;
@@ -1154,7 +1228,7 @@ TEST_CASE("context parsing") {
 	destroy_line_buffer(b_2);
     }
 }
-value cgs_gen_gaussian_source(context* c, func_call f) {
+value spcl_gen_gaussian_source(context* c, func_call f) {
     static const valtype SRC_SIG[] = {VAL_STR, VAL_NUM, VAL_NUM, VAL_NUM, VAL_NUM, VAL_NUM};
     value ret = check_signature(f, SIGLEN(SRC_SIG), SIGLEN(SRC_SIG)+3, SRC_SIG);
     if (ret.type)
@@ -1182,7 +1256,7 @@ value cgs_gen_gaussian_source(context* c, func_call f) {
     set_value(ret.val.c, "region", f.args[f.n_args-1].val, 1);
     return ret;
 }
-value cgs_gen_box(context* c, func_call f) {
+value spcl_gen_box(context* c, func_call f) {
     static const valtype BOX_SIG[] = {VAL_ARRAY, VAL_ARRAY};   
     value ret = check_signature(f, SIGLEN(BOX_SIG), SIGLEN(BOX_SIG)+3, BOX_SIG);
     if (ret.type)
@@ -1194,15 +1268,10 @@ value cgs_gen_box(context* c, func_call f) {
 }
 void setup_geometry_context(context* con) {
     //we have to set up the context with all of our functions
-    set_value(con, "Gaussian_source", make_val_func("Gaussian_source", 6, &cgs_gen_gaussian_source), 0);
-    set_value(con, "Box", make_val_func("Box", 2, &cgs_gen_box), 0);
+    set_value(con, "Gaussian_source", make_val_func("Gaussian_source", 6, &spcl_gen_gaussian_source), 0);
+    set_value(con, "Box", make_val_func("Box", 2, &spcl_gen_box), 0);
 }
 
-bool cgs_true(value v) {
-    if (v.type != VAL_NUM || v.val.x == 0)
-	return false;
-    return true;
-}
 TEST_CASE("file parsing") {
     char buf[BUF_SIZE];
     line_buffer* lb = make_line_buffer_file("test.geom");
@@ -1221,31 +1290,31 @@ TEST_CASE("file parsing") {
     v = lookup(c, "acid_test");
     CHECK(v.type == VAL_NUM);CHECK(v.val.x == 16);
     v = lookup(c, "acid_res");
-    CHECK(cgs_true(v));
+    CHECK(spcl_true(v));
     //lookup only does a shallow copy so we don't need to free
 
     strncpy(buf, "gs.__type__ == \"Gaussian_source\"", BUF_SIZE);
-    CHECK(cgs_true(parse_value(c, buf)));
+    CHECK(spcl_true(parse_value(c, buf)));
     strncpy(buf, "gs.component == \"Ey\"", BUF_SIZE);
-    CHECK(cgs_true(parse_value(c, buf)));
+    CHECK(spcl_true(parse_value(c, buf)));
     strncpy(buf, "gs.wavelength == 1.5", BUF_SIZE);
-    CHECK(cgs_true(parse_value(c, buf)));
+    CHECK(spcl_true(parse_value(c, buf)));
     strncpy(buf, "gs.amplitude == 7", BUF_SIZE);
-    CHECK(cgs_true(parse_value(c, buf)));
+    CHECK(spcl_true(parse_value(c, buf)));
     strncpy(buf, "gs.width == 3", BUF_SIZE);
-    CHECK(cgs_true(parse_value(c, buf)));
+    CHECK(spcl_true(parse_value(c, buf)));
     strncpy(buf, "gs.phase == 0.75", BUF_SIZE);
-    CHECK(cgs_true(parse_value(c, buf)));
+    CHECK(spcl_true(parse_value(c, buf)));
     strncpy(buf, "gs.cutoff == 6", BUF_SIZE);
-    CHECK(cgs_true(parse_value(c, buf)));
+    CHECK(spcl_true(parse_value(c, buf)));
     strncpy(buf, "gs.start_time == 5.2", BUF_SIZE);
-    CHECK(cgs_true(parse_value(c, buf)));
+    CHECK(spcl_true(parse_value(c, buf)));
     strncpy(buf, "gs.region.__type__ == \"Box\"", BUF_SIZE);
-    CHECK(cgs_true(parse_value(c, buf)));
+    CHECK(spcl_true(parse_value(c, buf)));
     strncpy(buf, "gs.region.pt_1 == vec(0,0,.2)", BUF_SIZE);
-    CHECK(cgs_true(parse_value(c, buf)));
+    CHECK(spcl_true(parse_value(c, buf)));
     strncpy(buf, "gs.region.pt_2 == vec(.4, 0.4, .2)", BUF_SIZE);
-    CHECK(cgs_true(parse_value(c, buf)));
+    CHECK(spcl_true(parse_value(c, buf)));
     destroy_line_buffer(lb);
     destroy_context(c);
 }

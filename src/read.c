@@ -212,8 +212,10 @@ static inline char* trim_whitespace(char* str, size_t* len) {
         if (!is_whitespace(str[i])) {
             last_non = i;
             if (!started && i > 0) {
-		for (_uint j = 0; str[i+j]; ++j)
+		_uint j = 0;
+		for (; str[i+j]; ++j)
 		    str[j] = str[i+j];
+		str[j] = 0;//we must null terminate
             }
 	    started = 1;
         }
@@ -1211,51 +1213,43 @@ value make_val_inst(context* parent, const char* s) {
     return v;
 }
 
-int value_cmp(value a, value b) {
+//returns 0 if a==b, a positive value if a>b, and a negative value if a<b
+static inline value value_cmp(value a, value b) {
     if (a.type != b.type || a.type == VAL_ERR || b.type == VAL_ERR)
-	return 1;
+	return make_val_error(E_BAD_VALUE, "cannot compare types %s and %s", valnames[a.type], valnames[b.type]);
     if (a.type == VAL_NUM) {
-	if (a.val.x == b.val.x)
-	    return 0;
-	if (a.val.x > b.val.x)
-	    return 1;
-	else
-	    return -1;
+	return make_val_num(a.val.x - b.val.x);
     } else if (a.type == VAL_STR) {
 	//first make sure that both strings are not null while ensuring that null strings compare identically
-	if ((a.val.s == NULL || b.val.s == NULL) && a.val.s != b.val.s)
-	    return 1;
-	return strcmp(a.val.s, b.val.s);
+	if (a.val.s == NULL) {
+	    if (b.val.s)
+		return make_val_num(1);
+	    return make_val_num(0);
+	}
+	//we don't need to check whether a is null again, if it reached this point it is valid
+	if (b.val.s == NULL)
+	    return make_val_num(-1);
+	return make_val_num(strcmp(a.val.s, b.val.s));
     } else if (a.type == VAL_LIST) {
-	//make sure that we can safely iterate
-	if ((a.val.l == NULL || b.val.l == NULL) && a.val.l != b.val.l)
-	    return 1;
-	if (a.n_els > b.n_els)
-	    return 1;
-	if (a.n_els < b.n_els)
-	    return -1;
+	if (a.n_els != b.n_els)
+	    return make_val_num(a.n_els - b.n_els);
+	value tmp;
 	for (size_t i = 0; i < a.n_els; ++i) {
-	    int tmp = value_cmp(a.val.l[i], b.val.l[i]);
-	    if (tmp) return tmp;
+	    tmp = value_cmp(a.val.l[i], b.val.l[i]);
+	    if (tmp.val.x)
+		return tmp;
 	}
-	return 0;
+	return make_val_num(0);
     } else if (a.type == VAL_ARRAY) {
-	if ((a.val.a == NULL || b.val.a == NULL) && a.val.a != b.val.a)
-	    return 1;
-	if (a.n_els > b.n_els)
-	    return 1;
-	if (a.n_els < b.n_els)
-	    return -1;
+	if (a.n_els != b.n_els)
+	    return make_val_num(a.n_els - b.n_els);
 	for (size_t i = 0; i < a.n_els; ++i) {
-	    if (a.val.a[i] > b.val.a[i])
-		return 1;
-	    else if (a.val.a[i] < b.val.a[i])
-		return -1;
+	    if (a.val.a[i] != b.val.a[i])
+		return make_val_num(a.val.a[i] - b.val.a[i]);
 	}
-	return 0;
+	return make_val_num(0);
     }
-    //TODO: implement other comparisons
-    return -2;
+    return make_val_undef();
 }
 
 int value_str_cmp(value a, const char* b) {
@@ -1739,6 +1733,8 @@ void val_exp(value* l, value r) {
 
 void cleanup_func(func_call* f) {
     if (f) {
+	if (f->name)
+	    free(f->name);
 	for (size_t i = 0; i < f->n_args; ++i)
 	    cleanup_name_val_pair(f->args[i]);
     }
@@ -1940,6 +1936,9 @@ void destroy_context(struct context* c) {
 
 //forward declare so that helpers can call
 static inline value parse_value_rs(context* c, read_state rs, lbi* new_end);
+#if DEBUG_INFO<1
+static inline
+#endif
 value do_op(context* c, read_state rs, lbi op_loc) {
     value sto = make_val_undef();
     //some operators (==, >=, <=) take up more than one character, test for these
@@ -1949,10 +1948,10 @@ value do_op(context* c, read_state rs, lbi op_loc) {
     /*if ((op == '=' || op == '>' || op == '<' || op == '+' || op == '-') && next == '=')
 	op_width = 2;*/
     //the expressions +=, -=, *=, /=, ==, >=, and <= are all valid, ?=, and .= are not
-    if (op != '?' && op != '.' && next == '=')
+    if (op != '?' && op != '.' && op != '|' && op != '&' && next == '=')
 	op_width = 2;
     else if ((op == '|' || op == '&') && (next == op))
-	op_width == 2;
+	op_width = 2;
     //set a read state before the operator and after the operator
     read_state rs_l = rs;
     read_state rs_r = rs;
@@ -1961,8 +1960,8 @@ value do_op(context* c, read_state rs, lbi op_loc) {
     if (op == '?') {
 	//ternary operators and dereferences are special cases
 	//the colon must be present
-	char* col_loc = strchr_block(rs.b->lines[rs.pos.line], ':');
-	if (!col_loc)
+	lbi col_loc = strchr_block_rs(rs.b, op_loc, rs.end, ':');
+	if (lbicmp(col_loc, rs.end) >= 0)
 	    return make_val_error(E_BAD_SYNTAX, "expected ':' in ternary");
 
 	value l = parse_value_rs(c, rs_l, NULL);
@@ -1970,12 +1969,12 @@ value do_op(context* c, read_state rs, lbi op_loc) {
 	    return l;
 	//0 branch
 	if (l.type == VAL_UNDEF || l.val.x == 0) {
-	    rs_r.pos.off = col_loc - rs.b->lines[rs.pos.line] + 1;
+	    rs_r.pos = lb_add(rs.b, col_loc, 1);
 	    sto = parse_value_rs(c, rs_r, NULL);
 	    return sto;
 	} else {
 	    //1 branch
-	    rs_r.end.off = col_loc - rs.b->lines[rs.pos.line];
+	    rs_r.end = col_loc;
 	    sto = parse_value_rs(c, rs_r, NULL);
 	    return sto;
 	}
@@ -1997,6 +1996,13 @@ value do_op(context* c, read_state rs, lbi op_loc) {
 	set_value(c, str, tmp_val, 0);
 	free(str);
 	return make_val_undef();
+    } else if (op == '!' && op_width == 1) {
+	value tmp_val = parse_value_rs(c, rs_r, NULL);
+	if (tmp_val.type == VAL_ERR)
+	    return tmp_val;
+	if (tmp_val.type == VAL_UNDEF || (tmp_val.type == VAL_NUM && tmp_val.val.x == 0))
+	    return make_val_num(1);
+	return make_val_num(0);
     }
 
     //parse right and left values
@@ -2014,65 +2020,38 @@ value do_op(context* c, read_state rs, lbi op_loc) {
     sto.type = VAL_NUM;
     sto.n_els = 1;
     //handle equality comparisons
-    if (op == '=' && op_width == 2) {
-	sto.val.x = (value_cmp(l, r) == 0);
-    } else if (op == '>') {
-	int cmp = value_cmp(l, r);
-	if (cmp < -1) {
-	    sto = make_val_error(E_BAD_VALUE, "cannot compare types <%s> and <%s>", valnames[l.type], valnames[r.type]);
-	    goto finish;
-	}
-	if (op_width == 2)
-	    sto.val.x = (cmp >= 0);
-	else
-	    sto.val.x = (cmp > 0);
-    } else if (op == '<') {
-	int cmp = value_cmp(l, r);
-	if (cmp < -1) {
-	    sto = make_val_error(E_BAD_VALUE, "cannot compare types <%s> and <%s>", valnames[l.type], valnames[r.type]);
-	    goto finish;
-	}
-	if (op_width == 2)
-	    sto.val.x = (cmp <= 0);
-	else
-	    sto.val.x = (cmp < 0);
-    //handle arithmetic
-    }/* else if (op == '+') {
-	if (next == '=') {
-	    val_add(c->table + tab_ind, r);
-	    l = c->table[tab_ind];
+    if (op == '!' || op == '=' || op == '>' || op == '<') {
+	value cmp = value_cmp(l,r);
+	cleanup_val(&l);
+	cleanup_val(&r);
+	if (cmp.type == VAL_ERR)
+	    return cmp;
+	if (op == '=')
+	    return make_val_num(!cmp.val.x);
+	if (op == '!')
+	    return cmp;
+	if (op == '>') {
+	    if (op_width == 2)
+		return make_val_num(cmp.val.x >= 0);
+	    return make_val_num(cmp.val.x > 0);
 	} else {
-	    val_add(&l, r);
+	    if (op_width == 2)
+		return make_val_num(cmp.val.x <= 0);
+	    return make_val_num(cmp.val.x < 0);
 	}
-	goto finish_arith;
-    } else if (op == '-') {
-	if (next == '=') {
-	    val_sub(c->table + tab_ind, r);
-	    l = c->table[tab_ind];
-	} else {
-	    val_sub(&l, r);
-	}
-	goto finish_arith;
-    } else if (op == '*') {
-	if (next == '*') {
-	    val_exp(&l, r);
-	} else if (next == '=') {
-	    val_mul(c->table + tab_ind, r);
-	    l = c->table[tab_ind];
-	} else {
-	    val_mul(&l, r);
-	}
-	goto finish_arith;
-    } else if (op == '/') {
-	if (next == '=') {
-	    val_div(c->table + tab_ind, r);
-	    l = c->table[tab_ind];
-	} else {
-	    val_div(&l, r);
-	}
-	goto finish_arith;
-    }*/
-    else {
+    } else if (op == '|' || op == '&') {
+	if (next != op)
+	    return make_val_error(E_BAD_SYNTAX, "invalid operation \'%c%c\'", op, next);
+	if (l.type == VAL_NUM && r.type == VAL_NUM)
+	    return (op == '|')? make_val_num(l.val.x || r.val.x) : make_val_num(l.val.x && r.val.x);
+	//undefined == false
+	if (l.type == VAL_UNDEF)
+	    return (op == '|')? make_val_num(r.val.x) : make_val_num(0);
+	if (r.type == VAL_UNDEF)
+	    return (op == '|')? make_val_num(1) : make_val_num(0);
+	return make_val_num(1);
+    } else {
+	//arithmetic is all relatively simple
 	switch(op) {
 	case '+': val_add(&l, r);break;
 	case '-': val_sub(&l, r);break;
@@ -2086,15 +2065,9 @@ value do_op(context* c, read_state rs, lbi op_loc) {
 	    free(str);
 	    l = make_val_undef();
 	}
-	goto finish_arith;
+	cleanup_val(&r);
+	return l;
     }
-finish:
-    cleanup_val(&l);
-    cleanup_val(&r);
-    return sto;
-finish_arith:
-    cleanup_val(&r);
-    return l;
 }
 
 void setup_builtins(struct context* c) {
@@ -2241,7 +2214,6 @@ static inline read_state make_read_state(const line_buffer* lb, lbi s, lbi e) {
 
 static inline struct for_state make_for_state(context* c, read_state rs, lbi for_start, value* er) {
     struct for_state fs;
-    size_t n;
     lbi after_for = lb_add(rs.b, for_start, strlen("for"));
     //now look for a block labeled "in"
     fs.for_start = for_start;
@@ -2337,11 +2309,17 @@ static inline value find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi
 	}
 
 	if (blk_stk.ptr == 0) {
-	    //check for operations with higher priorities (higher priorities indicated by op_prec are executed later)
-	    if (cur == '=' && next != '=' && op_prec < 6) {
+	    //check for operations with higher priorities (higher priorities indicated by op_prec are executed later in order of operations)
+	    if (cur == '=' && next != '=' && op_prec < 7) {
+		op_prec = 7;
+		*op_loc = rs.pos;
+	    } else if (((cur == '=' && next == '=') || cur == '>' || cur == '<') && op_prec < 6) {
 		op_prec = 6;
 		*op_loc = rs.pos;
-	    } else if (((cur == '=' && next == '=') || cur == '>' || cur == '<') && op_prec < 5) {
+		//if this is a two character sequence like ==, >=, or <= we need to skip the next sign
+		if (next == '=')
+		    rs.pos = lb_add(rs.b, rs.pos, 1);
+	    } else if ((cur == '!' || (cur == '&' && next == '&') || (cur == '|' && next == '|')) && op_prec < 5) {
 		op_prec = 5;
 		*op_loc = rs.pos;
 		//if this is a two character sequence like ==, >=, or <= we need to skip the next sign
@@ -2382,17 +2360,15 @@ static inline value parse_literal_list(struct context* c, read_state rs, lbi ope
 	lbi s = find_token_before(rs.b, open_ind, rs.pos);
 	if (s.line != open_ind.line)
 	    return make_val_error(E_BAD_SYNTAX, "unexpected line break");
-	value lst = lookupn(c, rs.b->lines[s.line], open_ind.off-s.off);
+	value lst = lookupn(c, rs.b->lines[s.line]+s.off, open_ind.off-s.off);
 	if (lst.type != VAL_LIST && lst.type != VAL_ARRAY && lst.type != VAL_MAT) {
 	    cleanup_val(&lst);
 	    return make_val_error(E_BAD_TYPE, "tried to index from non list type %s", valnames[lst.type]);
 	}
 	value contents = parse_value_rs(c, make_read_state(rs.b, lb_add(rs.b, open_ind, 1), close_ind), NULL);
 	//check that we found the list and that it was valid
-	if (contents.type != VAL_NUM) {
-	    cleanup_val(&contents);
+	if (contents.type != VAL_NUM)
 	    return make_val_error(E_BAD_SYNTAX, "only integers are valid indices\n");
-	}
 	//now figure out the index
 	long tmp = (long)(contents.val.x);
 	if (tmp < 0) tmp = lst.n_els+tmp;
@@ -2710,12 +2686,7 @@ static inline read_state make_read_state_lb(const line_buffer* pb) {
     else
 	ret.end = make_lbi(0, pb->line_sizes[0]);
     ret.b = pb;
-    ret.buf_size = BUF_SIZE;
-    ret.buf = (char*)calloc(ret.buf_size, sizeof(char));
     return ret;
-}
-static inline void destroy_read_state(read_state rs) {
-    free(rs.buf);
 }
 
 value read_from_lines(struct context* c, const line_buffer* b) {
@@ -2728,11 +2699,11 @@ value read_from_lines(struct context* c, const line_buffer* b) {
 	rs.end = make_lbi(rs.pos.line, b->line_sizes[rs.pos.line]);
 	er = parse_value_rs(c, rs, &end);
 	if (er.type == VAL_ERR) {
-	    destroy_read_state(rs);
 	    if (c->parent == NULL)
-		fprintf(stderr, "Error %s (line %lu): %s\n", errnames[er.val.e->c], rs.pos.line, er.val.e->msg);
+		fprintf(stderr, "Error %s on line %lu: %s\n", errnames[er.val.e->c], rs.pos.line+1, er.val.e->msg);
 	    return er;
 	}
+	cleanup_val(&er);
 	rs.pos = lb_add(b, end, 1);
     }
     return er;

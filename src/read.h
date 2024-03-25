@@ -341,10 +341,6 @@ value make_val_func(const char* name, size_t n_args, value (*p_exec)(struct cont
  */
 value make_val_inst(struct context* parent, const char* s);
 /**
- * returns 0 if a and b are equal. If a.type==b.type==numeric then 1 is returned if a>b and -1 is returned if a<b. If a.type==b.type==string then the behavior is identical to the c function strcmp() (i.e. 1 if a is alphabetically after b). On error, -2 is returned.
- */
-int value_cmp(value a, value b);
-/**
  * returns true if a is a string matching b
  */
 int value_str_cmp(value a, const char* b);
@@ -434,6 +430,7 @@ typedef struct name_val_pair {
 struct name_val_pair make_name_val_pair(const char* p_name, value p_val);
 void cleanup_name_val_pair(name_val_pair nv);
 
+//TODO: refactor func_call to accept lbi's instead of names
 typedef struct func_call {
     char* name;
     name_val_pair args[ARGS_BUF_SIZE];
@@ -466,8 +463,6 @@ typedef struct read_state {
     const line_buffer* b;
     lbi pos;
     lbi end;
-    size_t buf_size;
-    char* buf;
 } read_state;
 
 inline size_t con_size(const context* c) { if (!c) return 0;return 1 << c->t_bits; }
@@ -487,7 +482,9 @@ void destroy_context(context* c);
 /**
  * Execute the mathematical operation in the string str at the location op_ind
  */
+#if DEBUG_INFO>0
 value do_op(struct context* c, read_state rs, lbi op_loc);
+#endif
 /**
  * include builtin functions
  * TODO: make this not dumb
