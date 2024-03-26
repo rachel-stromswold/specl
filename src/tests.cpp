@@ -5,6 +5,8 @@ extern "C" {
 #include "read.h"
 }
 
+#define TEST_FNAME	"/tmp/speclang_test.spcl"
+
 bool spcl_true(value v) {
     if (v.type != VAL_NUM || v.val.x == 0)
 	return false;
@@ -15,6 +17,20 @@ void test_num(value v, double x) {
     CHECK(v.type == VAL_NUM);
     CHECK(v.val.x == x);
     CHECK(v.n_els == 1);
+}
+
+TEST_CASE("namecmp") {
+    CHECK(namecmp("foo", "foo", 3) == 0);
+    CHECK(namecmp("foo", "foot", 2) == 0);
+    CHECK(namecmp("foo", "foot", 3) != 0);
+    CHECK(namecmp("foo", "bar", 3) != 0);
+
+    CHECK(namecmp("foo ", "foo", 3) == 0);
+    CHECK(namecmp("foo ", "foo", SIZE_MAX) == 0);
+    CHECK(namecmp("foo ", "foo+", 3) == 0);
+    CHECK(namecmp("\tfoo ", "foo", 3) == 0);
+    CHECK(namecmp("foo ", "-foo+", 3) == 0);
+    CHECK(namecmp("ta ", "tan", 2) != 0);
 }
 
 TEST_CASE("value parsing") {
@@ -362,7 +378,6 @@ TEST_CASE("string handling") {
     const size_t STR_SIZE = 64;
     context* sc = make_context(NULL);
     char buf[STR_SIZE];memset(buf, 0, STR_SIZE);
-    size_t len;
     //check that parsing an empty (or all whitespace) string gives VAL_UNDEF
     value tmp_val = parse_value(sc, buf);
     CHECK(tmp_val.type == VAL_UNDEF);
@@ -839,28 +854,20 @@ char* fetch_lb_line(const line_buffer* lb, size_t line, size_t off) {
     lbi e = make_lbi(line, lb->line_sizes[line]);
     return lb_get_line(lb, s, e, NULL);
 }
-TEST_CASE("line_buffer splitting") {
-    const char* lines[] = { "apple; banana;c", ";orange" };
-    size_t n_lines = sizeof(lines)/sizeof(char*);
-    line_buffer* lb = make_line_buffer_lines(lines, n_lines);
-    REQUIRE(lb->n_lines == 2);
-    char* strval = fetch_lb_line(lb, 0, 0);CHECK(strcmp(lines[0], strval) == 0);free(strval);
-    strval = fetch_lb_line(lb, 1, 0);CHECK(strcmp(lines[1], strval) == 0);free(strval);
-    lb_split(lb, ';');
-    REQUIRE(lb->n_lines == 5);
-    strval = fetch_lb_line(lb, 0, 0);CHECK(strcmp("apple", strval) == 0);free(strval);
-    strval = fetch_lb_line(lb, 1, 0);CHECK(strcmp(" banana", strval) == 0);free(strval);
-    strval = fetch_lb_line(lb, 2, 0);CHECK(strcmp("c", strval) == 0);free(strval);
-    strval = fetch_lb_line(lb, 3, 0);CHECK(strcmp("", strval) == 0);free(strval);
-    strval = fetch_lb_line(lb, 4, 0);CHECK(strcmp("orange", strval) == 0);free(strval);
-    destroy_line_buffer(lb);
+
+void write_test_file(const char** lines, size_t n_lines, const char* fname) {
+    FILE* f = fopen(fname, "w");
+    for (size_t i = 0; i < n_lines; ++i)
+	fprintf(f, "%s\n", lines[i]);
+    fclose(f);
 }
 
 TEST_CASE("test line_buffer it_single") {
     const char* lines[] = { "def test_fun(a)", "{", "if a > 5 {", "return 1", "}", "return 0", "}" };
     size_t n_lines = sizeof(lines)/sizeof(char*);
+    write_test_file(lines, n_lines, TEST_FNAME);
     //check the lines (curly brace on new line)
-    line_buffer* lb = make_line_buffer_lines(lines, n_lines);
+    line_buffer* lb = make_line_buffer(TEST_FNAME);
     //test it_single
     int depth = 0;
     char* it_single_str = NULL;
@@ -933,8 +940,9 @@ TEST_CASE("line_buffer lb_get_enclosed") {
     SUBCASE("open brace on a different line") {
 	const char* lines[] = { "def test_fun(a)", "{", "if a > 5 {", "return 1", "}", "return 0", "}" };
 	size_t n_lines = sizeof(lines)/sizeof(char*);
+	write_test_file(lines, n_lines, TEST_FNAME);
 	//check the lines (curly brace on new line)
-	line_buffer* lb = make_line_buffer_lines(lines, n_lines);
+	line_buffer* lb = make_line_buffer(TEST_FNAME);
 	for (size_t i = 0; i < n_lines; ++i) {
 	    strval = fetch_lb_line(lb, i, 0);
 	    CHECK(strcmp(lines[i], strval) == 0);
@@ -980,8 +988,9 @@ TEST_CASE("line_buffer lb_get_enclosed") {
     SUBCASE("open brace on the same line") {
 	const char* lines[] = { "def test_fun(a) {", "if a > 5 {", "return 1", "}", "return 0", "}" };
 	size_t n_lines = sizeof(lines)/sizeof(char*);
+	write_test_file(lines, n_lines, TEST_FNAME);
 	//check the lines (curly brace on same line)
-	line_buffer* lb = make_line_buffer_lines(lines, n_lines);
+	line_buffer* lb = make_line_buffer(TEST_FNAME);
 	for (size_t i = 0; i < n_lines; ++i) {
 	    strval = fetch_lb_line(lb, i,0);CHECK(strcmp(lines[i], strval) == 0);free(strval);
 	}
@@ -1025,8 +1034,9 @@ TEST_CASE("line_buffer lb_get_enclosed") {
     SUBCASE("everything on one line") {
 	const char* lines[] = { "def test_fun(a) {if a > 5 {return 1}return 0}" };
 	size_t n_lines = sizeof(lines)/sizeof(char*);
+	write_test_file(lines, n_lines, TEST_FNAME);
 	//check the lines (curly brace on new line)
-	line_buffer* lb = make_line_buffer_lines(lines, n_lines);
+	line_buffer* lb = make_line_buffer(TEST_FNAME);
 	for (size_t i = 0; i < n_lines; ++i) {
 	    strval = fetch_lb_line(lb, i,0);CHECK(strcmp(lines[i], strval) == 0);free(strval);
 	}
@@ -1096,6 +1106,7 @@ TEST_CASE("context lookups") {
     char name[GEN_LEN+1];
     memset(name, 0, GEN_LEN+1);
     context* c = make_context(NULL);
+    set_value(c, "tao", make_val_str("tao"), 0);
     size_t n_combs = 1;
     for (size_t i = 0; i < GEN_LEN; ++i)
 	n_combs *= n_letters;
@@ -1118,8 +1129,8 @@ TEST_CASE("context lookups") {
     auto end = std::chrono::steady_clock::now();
     double time = std::chrono::duration <double, std::milli> (end-start).count();
     printf("took %f ms to set %lu elements\n", time, n_combs);
-    //lookup something not in the context
-    CHECK(c->n_memb == n_combs+before_size);
+    //lookup something not in the context, check that we only added n_combs-1 elements because we added one match explicitly before
+    CHECK(c->n_memb == n_combs+before_size-1);
     v = lookup(c, "vetaon");
     CHECK(v.type == VAL_UNDEF);
     CHECK(v.val.x == 0);
@@ -1131,9 +1142,9 @@ TEST_CASE("context parsing") {
     SUBCASE ("without nesting") {
 	const char* lines[] = { "a = 1", "\"b\"", " c = [\"d\", \"e\"]" }; 
 	size_t n_lines = sizeof(lines)/sizeof(char*);
-	line_buffer* b_1 = make_line_buffer_lines(lines, n_lines);
-	context* c = make_context(NULL);
-	value er = read_from_lines(c, b_1);
+	write_test_file(lines, n_lines, TEST_FNAME);
+	value er;
+	context* c = context_from_file(TEST_FNAME, 0, NULL, &er);
 	CHECK(er.type != VAL_ERR);
 	//lookup the named values
 	value val_a = lookup(c, "a");
@@ -1144,15 +1155,14 @@ TEST_CASE("context parsing") {
 	CHECK(val_c.n_els == 2);
 	CHECK(val_c.val.l[0].type == VAL_STR);
 	CHECK(val_c.val.l[1].type == VAL_STR);
-	destroy_line_buffer(b_1);
 	destroy_context(c);
     }
     SUBCASE ("with nesting") {
-	const char* lines[] = { "a = {name = \"apple\", values = [20, 11]}", "b = a.values[0]", "c = a.values[1] + a.values[0]+1" }; 
+	const char* lines[] = { "a = {name = \"apple\",", "values = [20, 11]}", "b = a.values[0]", "c = a.values[1] + a.values[0]+1" }; 
 	size_t n_lines = sizeof(lines)/sizeof(char*);
-	line_buffer* b_1 = make_line_buffer_lines(lines, n_lines);
-	context* c = make_context(NULL);
-	value er = read_from_lines(c, b_1);
+	write_test_file(lines, n_lines, TEST_FNAME);
+	value er;
+	context* c = context_from_file(TEST_FNAME, 0, NULL, &er);
 	CHECK(er.type != VAL_ERR);
 	//lookup the named values
 	value val_a = lookup(c, "a");
@@ -1174,7 +1184,6 @@ TEST_CASE("context parsing") {
 	CHECK(val_c.type == VAL_NUM);
 	CHECK(val_c.val.x == 32);
 	destroy_context(c);
-	destroy_line_buffer(b_1);
     }
     SUBCASE ("user defined functions") {
 	const char* fun_name = "test_fun";
@@ -1182,7 +1191,8 @@ TEST_CASE("context parsing") {
 
 	const char* lines[] = { "a = test_fun(1)", "b=test_fun(10)" };
 	size_t n_lines = sizeof(lines)/sizeof(char*);
-	line_buffer* b_1 = make_line_buffer_lines(lines, n_lines);
+	write_test_file(lines, n_lines, TEST_FNAME);
+	line_buffer* b_1 = make_line_buffer(TEST_FNAME);
 	context* c = make_context(NULL);
 	value tmp_f = make_val_func("test_fun", 1, &test_fun_call);
 	set_value(c, "test_fun", tmp_f, 1);
@@ -1211,10 +1221,12 @@ TEST_CASE("context parsing") {
 	    "Vodkis=1","Pagne=2","Meadaj=3","whis=4","nac4=5","RaKi=6","gyn=7","cid=8","Daiqui=9","Mooshi=10","Magnac=2","manChe=3","tes=4","Bourbu=5","magna=6","sak=7","Para=8","Keffi=9","Guino=10","Uuqax=11","Thraxeods=12","Trinzoins=13","gheds=14","theSoild=15","vengirs=16",
 	    "y = 2.0", "xs = linspace(0, y, 10000)", "arr1 = [math.sin(6*x/y) for x in xs]" };
 	size_t n_lines1 = sizeof(lines1)/sizeof(char*);
-	line_buffer* b_1 = make_line_buffer_lines(lines1, n_lines1);
+	write_test_file(lines1, n_lines1, TEST_FNAME);
+	line_buffer* b_1 = make_line_buffer(TEST_FNAME);
 	const char* lines2[] = { "arr2 = [gam(x/y) for x in xs]" };
 	size_t n_lines2 = sizeof(lines2)/sizeof(char*);
-	line_buffer* b_2 = make_line_buffer_lines(lines2, n_lines2);
+	write_test_file(lines2, n_lines2, TEST_FNAME);
+	line_buffer* b_2 = make_line_buffer(TEST_FNAME);
 	context* c = make_context(NULL);
 	value er = read_from_lines(c, b_1);
 	CHECK(er.type != VAL_ERR);
@@ -1228,14 +1240,15 @@ TEST_CASE("context parsing") {
 	destroy_line_buffer(b_2);
     }
 }
+static const valtype SRC_SIG[] = {VAL_STR, VAL_NUM, VAL_NUM, VAL_NUM, VAL_NUM, VAL_NUM, VAL_NUM, VAL_INST};
 value spcl_gen_gaussian_source(context* c, func_call f) {
-    static const valtype SRC_SIG[] = {VAL_STR, VAL_NUM, VAL_NUM, VAL_NUM, VAL_NUM, VAL_NUM};
-    value ret = check_signature(f, SIGLEN(SRC_SIG), SIGLEN(SRC_SIG)+3, SRC_SIG);
+    SIGCHECK_OPTS(f, 5, SRC_SIG);
+    /*value ret = check_signature(f, SIGLEN(SRC_SIG), SIGLEN(SRC_SIG)+3, SRC_SIG);
     if (ret.type)
 	return ret;
     if (f.args[f.n_args-1].val.type != VAL_INST)
-	return make_val_error(E_BAD_TYPE, "");
-    ret = make_val_inst(c, "Gaussian_source");
+	return make_val_error(E_BAD_TYPE, "");*/
+    value ret = make_val_inst(c, "Gaussian_source");
     set_value(ret.val.c, "component", f.args[0].val, 1);
     set_value(ret.val.c, "wavelength", f.args[1].val, 0);
     set_value(ret.val.c, "amplitude", f.args[2].val, 0);
@@ -1256,12 +1269,13 @@ value spcl_gen_gaussian_source(context* c, func_call f) {
     set_value(ret.val.c, "region", f.args[f.n_args-1].val, 1);
     return ret;
 }
+static const valtype BOX_SIG[] = {VAL_ARRAY, VAL_ARRAY};
 value spcl_gen_box(context* c, func_call f) {
-    static const valtype BOX_SIG[] = {VAL_ARRAY, VAL_ARRAY};   
-    value ret = check_signature(f, SIGLEN(BOX_SIG), SIGLEN(BOX_SIG)+3, BOX_SIG);
+    SIGCHECK(f, BOX_SIG);
+    /*value ret = check_signature(f, SIGLEN(BOX_SIG), SIGLEN(BOX_SIG)+3, BOX_SIG);
     if (ret.type)
-	return ret;
-    ret = make_val_inst(c, "Box");
+	return ret;*/
+    value ret = make_val_inst(c, "Box");
     set_value(ret.val.c, "pt_1", f.args[0].val, 1);
     set_value(ret.val.c, "pt_2", f.args[1].val, 1);
     return ret;
@@ -1274,7 +1288,7 @@ void setup_geometry_context(context* con) {
 
 TEST_CASE("file parsing") {
     char buf[BUF_SIZE];
-    line_buffer* lb = make_line_buffer_file("test.geom");
+    line_buffer* lb = make_line_buffer("test.geom");
     context* c = make_context(NULL);
     setup_geometry_context(c);
     value er = read_from_lines(c, lb);

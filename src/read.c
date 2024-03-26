@@ -29,10 +29,41 @@ static inline int is_whitespace(char c) {
 /**
  * Helper function for token_block which tests whether the character c is a token terminator
  */
-static inline int is_char_sep(char c) {
+static inline unsigned char is_char_sep(char c) {
     if (is_whitespace(c) || c == ';' || c == '+'  || c == '-' || c == '*'  || c == '/')
 	return 1;
     return 0;
+}
+
+int namecmp(const char* a, const char* b, size_t n) {
+    size_t i = 0;size_t j = 0;
+    while (i < n && is_char_sep(a[i]))
+	++i;
+    while (j < n && is_char_sep(a[j]))
+	++j;
+    unsigned char hit_end = 0;// hit_end&1 did a hit a whitespace block? hit_end&2 did b hit a whitespace block?
+    while (i < n && j < n) {
+	/*if (is_char_sep(a[i]))
+	    hit_end |= 1;
+	if (is_char_sep(b[j]))
+	    hit_end |= 2;*/
+	hit_end = is_char_sep(a[i]) | (is_char_sep(b[i]) << 1);
+	//if both strings hit the end and we haven't already exited, that means there was a match
+	if (hit_end == 3)
+	    return 0;
+	//if only one string hit the end, then there wasn't a match
+	if (hit_end != 0)
+	    return 2*hit_end - 3;
+	//if we haven't hit the end of either string and there's a mismatch, return the difference
+	if (hit_end == 0 && a[i] != b[j])
+	    return (int)(a[i] - b[j]);
+	++i;
+	++j;
+    }
+    hit_end = is_char_sep(a[n]) | (is_char_sep(b[n]) << 1);
+    if (hit_end == 3 || hit_end == 0)
+	return 0;
+    return 2*hit_end - 3;
 }
 
 //check wheter s and e are matching delimeters
@@ -313,29 +344,6 @@ exit:
     free(ret);
     return NULL;
 }
-
-char* append_to_line(char* line, size_t* line_off, size_t* line_size, const char* str, size_t n) {
-    if (!line_off || !line_size || !str || n == 0) return line;
-    size_t ls = *line_size;
-    size_t i = *line_off;
-    if (!line || i + n >= ls) {
-	ls = 2*i + n + 1;
-	line = (char*)realloc(line, ls);
-    }
-    size_t j = 0;
-    for (; j < n; ++j) {
-	line[i+j] = str[j];
-	//terminate on reaching the string end
-	if (!str[j]) {
-	    ++j;
-	    break;
-	}
-    }
-    *line_off = i+j;
-    *line_size = ls;
-    return line;
-}
-
 /** ============================ lbi ============================ **/
 
 //create a new line buffer with the given line index and offset
@@ -393,7 +401,7 @@ void destroy_line_buffer(line_buffer* lb) {
     free(lb);
 }
 
-line_buffer* make_line_buffer_file(const char* p_fname) {
+line_buffer* make_line_buffer(const char* p_fname) {
     line_buffer* lb = alloc_line_buffer();
     size_t buf_size = LINE_SIZE;
     lb->lines = (char**)malloc(sizeof(char*)*buf_size);
@@ -403,7 +411,6 @@ line_buffer* make_line_buffer_file(const char* p_fname) {
     if (p_fname)
         fp = fopen(p_fname, "r");
     if (fp) {
-        size_t lineno = 1;
         size_t line_len = 0;
         int go_again = 1;
         do {
@@ -422,14 +429,17 @@ line_buffer* make_line_buffer_file(const char* p_fname) {
                     this_size *= 2;
                     this_buf = realloc(this_buf, sizeof(char)*this_size);
                 }
-                if (res == EOF || (char)res == ';' || (char)res == '\n') {
+                if ((char)res == ';' || (char)res == '\n') {
                     this_buf[line_len] = 0;
-                    if ((char)res == '\n')
-                        ++lineno;
-                    else if ((char)res == EOF)
-                        go_again = 0;
                     break;
-                }
+                } else if (res == EOF) {
+		    this_buf[line_len] = 0;
+		    go_again = 0;
+		    break;
+		} else if ((char)res == '/' && line_len > 0 && this_buf[line_len-1] == '/') {
+		    this_buf[line_len-1] = 0;
+		    break;
+		}
                 this_buf[line_len] = (char)res;
                 res = fgetc(fp);
             }
@@ -452,66 +462,6 @@ line_buffer* make_line_buffer_file(const char* p_fname) {
     return lb;
 }
 
-/**
- * Create a line buffer from a single line separated by characters of the type sep such that sep are not contained inside any blocks specified by ignore_blocks. Seperation characters are not included.
- */
-line_buffer* make_line_buffer_lines(const char** p_lines, size_t pn_lines) {
-    line_buffer* lb = alloc_line_buffer();
-    lb->n_lines = pn_lines;
-    lb->lines = malloc(sizeof(char*) * lb->n_lines);
-    lb->line_sizes = malloc(sizeof(size_t) * lb->n_lines);
-    for (size_t i = 0; i < lb->n_lines; ++i) {
-        lb->line_sizes[i] = strlen(p_lines[i]);
-        lb->lines[i] = strdup(p_lines[i]);
-    }
-    return lb;
-}
-
-/**
- * Create a line buffer from a single line separated by characters of the type sep such that sep are not contained inside any blocks specified by ignore_blocks. Seperation characters are not included.
- */
-line_buffer* make_line_buffer_sep(const char* line, char sep) {
-    line_buffer* lb = alloc_line_buffer();
-    lb->n_lines = 0;
-    static const char* ignore_blocks = "\"\"()[]{}";
-    //by doing this we allocate once since we have a guaranteed upper limit on the number of lines that might exist
-    size_t line_buf_size = strlen(line);
-    lb->lines = malloc(sizeof(char*) * line_buf_size);
-    lb->line_sizes = malloc(sizeof(size_t) * line_buf_size);
-    int nest_level = 0;
-    size_t last_sep = 0;
-    size_t i = 0;
-    for (;; ++i) {
-	//iterate through pairs of open/close block delimeters
-        for (size_t j = 0; ignore_blocks[j] && ignore_blocks[j + 1]; j += 2) {
-            if (line[i] == ignore_blocks[j] && ignore_blocks[j] == ignore_blocks[j + 1]) {
-		//there's a special case for things like quotations, skip ahead until we find the end
-                ++i;
-                for (; line[i] && line[i] != ignore_blocks[j]; ++i)
-                    ;
-                break;
-            } else if (line[i] == ignore_blocks[j]) {
-                ++nest_level;
-            } else if (line[i] == ignore_blocks[j + 1]) {
-                --nest_level;
-            }
-        }
-        if (nest_level <= 0 && (line[i] == sep || line[i] == 0)) {
-            lb->line_sizes[lb->n_lines] = i - last_sep;
-            lb->lines[lb->n_lines] = (char*)malloc(sizeof(char)*lb->line_sizes[lb->n_lines]);
-            for (size_t j = last_sep; j < i; ++j) {
-                lb->lines[lb->n_lines][j - last_sep] = line[j];
-            }
-            lb->lines[lb->n_lines][lb->line_sizes[lb->n_lines]-1] = 0;
-            last_sep = i + 1;
-            ++lb->n_lines;
-            if (line[i] == 0)
-                break;
-        }
-    }
-    return lb;
-}
-
 line_buffer* copy_line_buffer(const line_buffer* o) {
     line_buffer* lb = alloc_line_buffer();
     lb->n_lines = o->n_lines;
@@ -522,6 +472,10 @@ line_buffer* copy_line_buffer(const line_buffer* o) {
         lb->line_sizes[i] = o->line_sizes[i];
     }
     return lb;
+}
+
+lbi lb_end(const line_buffer* lb) {
+    return make_lbi(lb->n_lines, 0);
 }
 
 //increase the line buffer lhs by rhs characters while keeping line number the same
@@ -537,17 +491,6 @@ lbi lb_add(const line_buffer* lb, lbi lhs, size_t rhs) {
 	    return make_lbi(lb->n_lines, 0);
 	ret.off = rem;
     } while(ret.off >= lb->line_sizes[ret.line]);
-    /*if (ret.off <= lb->line_sizes[ret.line])
-	return ret;
-    //otherwise we have to move up a line
-    size_t rem = ret.off - lb->line_sizes[ret.line];
-    while (ret.off >= lb->line_sizes[ret.line]) {
-	ret.off -= rem;
-	//make sure we aren't out of bounds
-	if (++ret.line >= lb->n_lines)
-	    return make_lbi(lb->n_lines, 0);
-	rem = ret.off - lb->line_sizes[ret.line];
-    }*/
     return ret;
 }
 
@@ -580,36 +523,6 @@ size_t lb_diff(const line_buffer* lb, lbi r, lbi l) {
     }
     ret -= l.off;
     return ret;
-}
-
-/**
- * Goes through a line buffer and splits into multiple lines at each instance of split_delim.
- * i.e. if the buffer is in the state
- * lines = {"foo; bar", "foobar;"}
- * then split(';') will transform the state to
- * lines = {"foo", " bar", "foobar;"}
- */
-void lb_split(line_buffer* lb, char split_delim) {
-    for (size_t i = 0; i < lb->n_lines; ++i) {
-        for (size_t j = 0; j < lb->line_sizes[i]; ++j) {
-            if (lb->lines[i][j] == split_delim) {
-		//find matches
-                lb->n_lines++;
-                lb->lines = (char**)realloc(lb->lines, sizeof(char*) * lb->n_lines);
-                lb->line_sizes = (size_t*)realloc(lb->line_sizes, sizeof(size_t) * lb->n_lines);
-		//move everything else forward
-                for (size_t k = lb->n_lines - 1; k > i + 1; --k) {
-                    lb->lines[k] = lb->lines[k - 1];
-                    lb->line_sizes[k] = lb->line_sizes[k - 1];
-                }
-		//split the line
-                lb->lines[i + 1] = strndup(lb->lines[i] + j + 1, lb->line_sizes[i] - j);
-                lb->lines[i][j] = 0;
-                lb->line_sizes[i + 1] = lb->line_sizes[i] - j - 1;
-                lb->line_sizes[i] = j;
-            }
-        }
-    }
 }
 
 /**
@@ -847,7 +760,7 @@ char lb_get(const line_buffer* lb, lbi pos) {
 }
 
 /** ======================================================== builtin functions ======================================================== **/
-value check_signature(func_call f, size_t min_args, size_t max_args, const valtype* sig) {
+value get_sigerr(func_call f, size_t min_args, size_t max_args, const valtype* sig) {
     if (!sig || max_args < min_args)
 	return make_val_undef();
     if (f.n_args < min_args)
@@ -862,11 +775,11 @@ value check_signature(func_call f, size_t min_args, size_t max_args, const valty
     }
     return make_val_undef();
 }
-value get_type(struct context* c, func_call f) {
+static const valtype TYPEOF_SIG[] = {VAL_UNDEF};
+value spcl_typeof(struct context* c, func_call f) {
+    SIGCHECK(f, TYPEOF_SIG);
     value sto;
     sto.type = VAL_STR;
-    if (f.n_args < 1)
-	return make_val_error(E_LACK_TOKENS, "typeof() expected 1 argument, got 0");
     //handle instances as a special case
     if (f.args[0].val.type == VAL_INST) {
 	value t = lookup(f.args[0].val.val.c, "__type__");
@@ -885,16 +798,14 @@ value get_type(struct context* c, func_call f) {
     sto.val.s = strdup(valnames[f.args[0].val.type]);
     return sto;
 }
-value get_len(struct context* c, func_call f) {
-    if (f.n_args < 1)
-	return make_val_error(E_LACK_TOKENS, "len() expected 1 argument, got 0");
+static const valtype LEN_SIG[] = {VAL_UNDEF};
+value spcl_len(struct context* c, func_call f) {
+    SIGCHECK(f, LEN_SIG);
     return make_val_num(f.args[0].val.n_els);
 }
-value make_range(struct context* c, func_call f) {
-    static const valtype RANGE_SIG[] = {VAL_NUM, VAL_NUM, VAL_NUM};
-    value sto = check_signature(f, 1, SIGLEN(RANGE_SIG), RANGE_SIG);
-    if (sto.type)
-	return sto;
+static const valtype RANGE_SIG[] = {VAL_NUM, VAL_NUM, VAL_NUM};
+value spcl_range(struct context* c, func_call f) {
+    SIGCHECK_OPTS(f, 1, RANGE_SIG);
     double min, max, inc;
     //interpret arguments depending on how many were provided
     if (f.n_args == 1) {
@@ -911,60 +822,62 @@ value make_range(struct context* c, func_call f) {
     //make sure arguments are valid
     if ((max-min)*inc <= 0)
 	return make_val_error(E_BAD_VALUE, "range(%f, %f, %f) with invalid increment", min, max, inc);
-    sto.type = VAL_ARRAY;
-    sto.n_els = (max - min) / inc;
-    sto.val.a = malloc(sizeof(double)*sto.n_els);
-    for (size_t i = 0; i < sto.n_els; ++i)
-	sto.val.a[i] = i*inc + min;
-    return sto;
+    value ret;
+    ret.type = VAL_ARRAY;
+    ret.n_els = (max - min) / inc;
+    ret.val.a = malloc(sizeof(double)*ret.n_els);
+    for (size_t i = 0; i < ret.n_els; ++i)
+	ret.val.a[i] = i*inc + min;
+    return ret;
 }
-value make_linspace(struct context* c, func_call f) {
-    static const valtype LINSPACE_SIG[] = {VAL_NUM, VAL_NUM, VAL_NUM};
-    value sto = check_signature(f, SIGLEN(LINSPACE_SIG), SIGLEN(LINSPACE_SIG), LINSPACE_SIG);
-    if (sto.type)
-	return sto;
-    sto.type = VAL_ARRAY;
-    sto.n_els = (size_t)(f.args[2].val.val.x);
+static const valtype LINSPACE_SIG[] = {VAL_NUM, VAL_NUM, VAL_NUM};
+value spcl_linspace(struct context* c, func_call f) {
+    SIGCHECK(f, LINSPACE_SIG);
+    value ret;
+    ret.type = VAL_ARRAY;
+    ret.n_els = (size_t)(f.args[2].val.val.x);
     //prevent divisions by zero
-    if (sto.n_els < 2)
-	return make_val_error(E_BAD_VALUE, "cannot make linspace with size %lu", sto.n_els);
-    sto.val.a = (double*)malloc(sizeof(double)*sto.n_els);
-    double step = (f.args[1].val.val.x - f.args[0].val.val.x)/(sto.n_els - 1);
-    for (size_t i = 0; i < sto.n_els; ++i) {
-	sto.val.a[i] = step*i + f.args[0].val.val.x;
+    if (ret.n_els < 2)
+	return make_val_error(E_BAD_VALUE, "cannot make linspace with size %lu", ret.n_els);
+    ret.val.a = (double*)malloc(sizeof(double)*ret.n_els);
+    double step = (f.args[1].val.val.x - f.args[0].val.val.x)/(ret.n_els - 1);
+    for (size_t i = 0; i < ret.n_els; ++i) {
+	ret.val.a[i] = step*i + f.args[0].val.val.x;
     }
-    return sto;
+    return ret;
 }
 STACK_DEF(value)
-value flatten_list(struct context* c, func_call f) {
-    static const valtype FLATTEN_LIST_SIG[] = {VAL_LIST};
-    value sto = check_signature(f, SIGLEN(FLATTEN_LIST_SIG), SIGLEN(FLATTEN_LIST_SIG), FLATTEN_LIST_SIG);
+static const valtype FLATTEN_SIG[] = {VAL_LIST};
+value spcl_flatten(struct context* c, func_call f) {
+    SIGCHECK(f, FLATTEN_SIG);
+    value ret = make_val_undef();
     value cur_list = f.args[0].val;
     //flattening an empty list is the identity op.
     if (cur_list.n_els == 0 || cur_list.val.l == NULL) {
-	sto.type = VAL_LIST;
-	return sto;
+	ret.type = VAL_LIST;
+	return ret;
     }
     size_t cur_st = 0;
-    //this is used for estimating the size of the buffer we need. Take however many elements were needed for this list and assume each sub-list has the same number of elements
-    size_t base_n_els = cur_list.n_els;
-    //start with the number of elements in the lowest order of the list
-    size_t buf_size = cur_list.n_els;
-    sto.val.l = (value*)malloc(sizeof(value)*buf_size);
     //there may potentially be nested lists, we need to be able to find our way back to the parent and the index once we're done
     stack(value) lists = make_stack(value)();
     stack(size_t) inds = make_stack(size_t)();
     //just make sure that there's a root level on the stack to be popped out
-    if ( push(value)(&lists, cur_list) ) return sto;
-    if ( push(size_t)(&inds, 0) ) return sto;
+    if ( push(value)(&lists, cur_list) ) return ret;
+    if ( push(size_t)(&inds, 0) ) return ret;
+
+    //this is used for estimating the size of the buffer we need. Take however many elements were needed for this list and assume each sub-list has the same number of elements
+    size_t base_n_els = cur_list.n_els;
+    //start with the number of elements in the lowest order of the list
+    size_t buf_size = cur_list.n_els;
+    ret.val.l = malloc(sizeof(value)*buf_size);
     size_t j = 0;
     do {
 	size_t i = cur_st;
 	size_t start_depth = inds.ptr;
 	for (; i < cur_list.n_els; ++i) {
 	    if (cur_list.val.l[i].type == VAL_LIST) {
-		if ( push(value)(&lists, cur_list) ) return sto;
-		if ( push(size_t)(&inds, i+1) ) return sto;//push + 1 so that we start at the next index instead of reading the list again
+		if ( push(value)(&lists, cur_list) ) return ret;
+		if ( push(size_t)(&inds, i+1) ) return ret;//push + 1 so that we start at the next index instead of reading the list again
 		cur_list = cur_list.val.l[i];
 		cur_st = 0;
 		break;
@@ -972,16 +885,16 @@ value flatten_list(struct context* c, func_call f) {
 	    if (j >= buf_size) {
 		//-1 since we already have at least one element. no base_n_els=0 check is needed since that case will ensure the for loop is never evaluated
 		buf_size += (base_n_els-1)*(i+1);
-		value* tmp_val = (value*)realloc(sto.val.l, sizeof(value)*buf_size);
+		value* tmp_val = realloc(ret.val.l, sizeof(value)*buf_size);
 		if (!tmp_val) {
-		    free(sto.val.l);
+		    free(ret.val.l);
 		    cleanup_func(&f);
 		    destroy_stack(value)(&lists, &cleanup_val);
 		    return make_val_error(E_NOMEM, "");
 		}
-		sto.val.l = tmp_val;
+		ret.val.l = tmp_val;
 	    }
-	    sto.val.l[j++] = copy_val(cur_list.val.l[i]);
+	    ret.val.l[j++] = copy_val(cur_list.val.l[i]);
 	}
 	//if we reached the end of a list without any sublists then we should return back to the parent list
 	if (inds.ptr <= start_depth) {
@@ -989,11 +902,11 @@ value flatten_list(struct context* c, func_call f) {
 	    pop(value)(&lists, &cur_list);
 	}
     } while (lists.ptr);
-    sto.type = VAL_LIST;
-    sto.n_els = j;
-    return sto;
+    ret.type = VAL_LIST;
+    ret.n_els = j;
+    return ret;
 }
-value concatenate(struct context* c, func_call f) {
+value spcl_cat(struct context* c, func_call f) {
     value sto;
     if (f.n_args < 2)
 	return make_val_error(E_LACK_TOKENS, "cat() expected 2 arguments but got %lu", f.n_args);
@@ -1064,7 +977,7 @@ value concatenate(struct context* c, func_call f) {
 /**
  * print the elements to the console
  */
-value print(struct context* c, func_call f) {
+value spcl_print(struct context* c, func_call f) {
     value ret = make_val_undef();
     for (size_t i = 0; i < f.n_args; ++i) {
 	if (f.args[i].val.type == VAL_NUM) {
@@ -1081,12 +994,9 @@ value print(struct context* c, func_call f) {
 /**
  * Make a vector argument with the x,y, and z coordinates supplied
  */
-value make_array(context* c, func_call f) {
-    static const valtype ARRAY_SIG[] = {VAL_LIST};
-    value sto = check_signature(f, SIGLEN(ARRAY_SIG), SIGLEN(ARRAY_SIG), ARRAY_SIG);
-    if (sto.type)
-	return sto;
-
+static const valtype ARRAY_SIG[] = {VAL_LIST};
+value spcl_array(context* c, func_call f) {
+    SIGCHECK(f, ARRAY_SIG);
     //treat matrices with one row as vectors
     if (f.n_args == 1) {
 	if (f.args[0].val.val.l[0].type == VAL_LIST)
@@ -1094,43 +1004,44 @@ value make_array(context* c, func_call f) {
 	else
 	    return cast_to(f.args[0].val, VAL_ARRAY);
     }
+    value ret;
     //otherwise we need to do more work
     size_t n_cols = f.args[0].val.n_els;
-    sto.type = VAL_MAT;
-    sto.n_els = f.n_args;
-    sto.val.l = (value*)malloc(sizeof(value)*f.n_args);
+    ret.type = VAL_MAT;
+    ret.n_els = f.n_args;
+    ret.val.l = malloc(sizeof(value)*f.n_args);
     //iterate through rows
     for (size_t i = 0; i < f.n_args; ++i) {
-	if (f.args[i].val.type == VAL_LIST) { free(sto.val.l);return make_val_error(E_BAD_TYPE, "non list encountered in matrix"); }
-	if (f.args[i].val.n_els != n_cols) { free(sto.val.l);return make_val_error(E_BAD_VALUE, "can't create matrix from ragged array"); }
-	sto.val.l[i] = cast_to(f.args[i].val, VAL_ARRAY);
+	if (f.args[i].val.type == VAL_LIST) { free(ret.val.l);return make_val_error(E_BAD_TYPE, "non list encountered in matrix"); }
+	if (f.args[i].val.n_els != n_cols) { free(ret.val.l);return make_val_error(E_BAD_VALUE, "can't create matrix from ragged array"); }
+	ret.val.l[i] = cast_to(f.args[i].val, VAL_ARRAY);
 	//check for errors
-	if (sto.val.l[i].type == VAL_ERR) {
-	    sto = copy_val(sto.val.l[i]);
-	    free(sto.val.l);
-	    return sto;
+	if (ret.val.l[i].type == VAL_ERR) {
+	    free(ret.val.l);
+	    ret = copy_val(ret.val.l[i]);
+	    return ret;
 	}
     }
-    return sto;
+    return ret;
 }
 
-value make_vec(context* c, func_call f) {
-    value sto = make_val_undef();
+value spcl_vec(context* c, func_call f) {
+    value ret = make_val_undef();
     //just copy the elements
-    sto.type = VAL_ARRAY;
-    sto.n_els = f.n_args;
+    ret.type = VAL_ARRAY;
+    ret.n_els = f.n_args;
     //skip copying an empty list
-    if (sto.n_els == 0)
-	return sto;
-    sto.val.a = (double*)malloc(sizeof(double)*sto.n_els);
+    if (ret.n_els == 0)
+	return ret;
+    ret.val.a = malloc(sizeof(double)*ret.n_els);
     for (size_t i = 0; i < f.n_args; ++i) {
 	if (f.args[i].val.type != VAL_NUM) {
-	    free(sto.val.a);
+	    free(ret.val.a);
 	    return make_val_error(E_BAD_TYPE, "cannot cast list with non-numeric types to array");
 	}
-	sto.val.a[i] = f.args[i].val.val.x;
+	ret.val.a[i] = f.args[i].val.val.x;
     }
-    return sto;
+    return ret;
 }
 
 //math functions
@@ -1187,7 +1098,7 @@ value make_val_str(const char* s) {
     value v;
     v.type = VAL_STR;
     v.n_els = strlen(s) + 1;
-    v.val.s = (char*)malloc(sizeof(char)*v.n_els);
+    v.val.s = malloc(sizeof(char)*v.n_els);
     for (size_t i = 0; i < v.n_els; ++i) v.val.s[i] = s[i];
     return v;
 }
@@ -1577,7 +1488,7 @@ void val_add(value* l, value r) {
 	l->val.s = n_str;
     } else {
 	cleanup_val(l);
-	*l = make_val_error(E_BAD_TYPE, "cannot add types <%s> and <%s>", valnames[l->type], r.type);
+	*l = make_val_error(E_BAD_TYPE, "cannot add types %s and %s", valnames[l->type], valnames[r.type]);
     }
 }
 
@@ -1610,7 +1521,7 @@ void val_sub(value* l, value r) {
 	}
     } else {
 	cleanup_val(l);
-	*l = make_val_error(E_BAD_TYPE, "cannot subtract types <%s> and <%s>", valnames[l->type], r.type);
+	*l = make_val_error(E_BAD_TYPE, "cannot subtract types %s and %s", valnames[l->type], valnames[r.type]);
     }
 }
 
@@ -1652,7 +1563,7 @@ void val_mul(value* l, value r) {
 	}
     } else {
 	cleanup_val(l);
-	*l = make_val_error(E_BAD_TYPE, "cannot multiply types <%s> and <%s>", valnames[l->type], r.type);
+	*l = make_val_error(E_BAD_TYPE, "cannot multiply types %s and %s", valnames[l->type], valnames[r.type]);
     }
 }
 
@@ -1694,7 +1605,7 @@ void val_div(value* l, value r) {
 	}
     } else {
 	cleanup_val(l);
-	*l = make_val_error(E_BAD_TYPE, "cannot divide types <%s> and <%s>", valnames[l->type], r.type);
+	*l = make_val_error(E_BAD_TYPE, "cannot divide types %s and %s", valnames[l->type], valnames[r.type]);
     }
 }
 
@@ -1736,7 +1647,7 @@ void val_exp(value* l, value r) {
 	}
     } else {
 	cleanup_val(l);
-	*l = make_val_error(E_BAD_TYPE, "cannot raise types <%s> and <%s>", valnames[l->type], r.type);
+	*l = make_val_error(E_BAD_TYPE, "cannot raise types %s and %s", valnames[l->type], valnames[r.type]);
     }
 }
 
@@ -1852,7 +1763,7 @@ static inline int find_ind(const struct context* c, const char* name, size_t n, 
     size_t ii = fnv_1(name, n, c->t_bits);
     size_t i = ii;
     while (c->table[i].name) {
-	if (strncmp(name, c->table[i].name, n) == 0) {
+	if (namecmp(name, c->table[i].name, n) == 0) {
 	    *ind = i;
 	    return 1;
 	}
@@ -1965,13 +1876,14 @@ static inline value find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi
     stack(char) blk_stk = make_stack(char)();
     //variable names are not allowed to start with '+', '-', or a digit and may not contain any '.' symbols. Use this to check whether the value is numeric
     char open_type, prev;
-    char cur = lb_get(rs.b, rs.start);
-    //int is_numeric = (cur == '+' || cur == '-' || cur == '.' || (cur >= '0' && cur <= '9'));
-    cur = 0;
+    char cur = 0;
 
     //keep track of the precedence of the orders of operation (lower means executed later) ">,=,>=,==,<=,<"=4 "+,-"=3, "*,/"=2, "**"=1
     char op_prec = 0;
-    for (; lbicmp(rs.start, rs.end) < 0; rs.start = lb_add(rs.b, rs.start, 1)) {
+    for (; lbicmp(rs.start, rs.end) < 0 || blk_stk.ptr; rs.start = lb_add(rs.b, rs.start, 1)) {
+	//make sure we don't read past the end of the file
+	if (lbicmp(rs.start, lb_end(rs.b)) >= 0)
+	    break;
 	prev = cur;
 	cur = lb_get(rs.b, rs.start);
 	char next = lb_get(rs.b, lb_add(rs.b, rs.start, 1));
@@ -1999,7 +1911,7 @@ static inline value find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi
 	    //ignore everything after a comment
 	    if (next == '/') {
 		rs.start.off = rs.b->line_sizes[rs.start.line];
-		continue;
+		break;
 	    }
 	}
 
@@ -2034,7 +1946,7 @@ static inline value find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi
 		op_prec = 1;
 		*op_loc = rs.start;
 	    } else if (cur == ';') {
-		*new_end = rs.start;
+		break;
 	    }
 	}
     }
@@ -2043,6 +1955,7 @@ static inline value find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi
 	destroy_stack(char)(&blk_stk, NULL);
 	return make_val_error(E_BAD_SYNTAX, "expected %c", get_match(open_type));
     }
+    if (new_end) *new_end = rs.start;
     destroy_stack(char)(&blk_stk, NULL);
     return make_val_undef();
 }
@@ -2057,6 +1970,7 @@ static inline value lookup_rs(context* c, read_state rs) {
     if (!lbicmp(dot_loc, rs.end) && !lbicmp(ref_loc, rs.end)) {
 	//if there was neither a period or open brace, just lookup directly
 	size_t i, n;
+	//TODO: eliminate memory allocation and freeing since its slow
 	char* str = trim_whitespace(lb_get_line(rs.b, rs.start, rs.end, NULL), &n);
 	while (c) {
 	    if (find_ind(c, str, n, &i)) {
@@ -2467,7 +2381,7 @@ static inline value parse_literal_func(struct context* c, read_state rs, lbi ope
     if (f.n_args == 0)
 	return make_val_error(E_BAD_SYNTAX, "overlapping parentheses (something really weird happened)");
     if (f.n_args >= ARGS_BUF_SIZE)
-	return make_val_error(E_OUT_OF_RANGE, "speclang only supports at most %lu arguments in functions", ARGS_BUF_SIZE-1);
+	return make_val_error(E_OUT_OF_RANGE, "spclang only supports at most %lu arguments in functions", ARGS_BUF_SIZE-1);
     //set up a function and figure out the function name 
     lbi s = find_token_before(rs.b, open_ind, rs.start);
     if (s.line != open_ind.line)
@@ -2553,6 +2467,7 @@ static inline value parse_value_rs(struct context* c, read_state rs, lbi* new_en
     //store locations of the first instance of different operators. We do this so we can quickly look up new operators if we didn't find any other operators of a lower precedence (such operators are placed in the tree first).
     lbi open_ind, close_ind, op_loc;
     sto = find_operator(rs, &op_loc, &open_ind, &close_ind, new_end);
+    if (new_end) rs.end = *new_end;
     if (sto.type == VAL_ERR)
 	return sto;
 
@@ -2597,7 +2512,6 @@ static inline value parse_value_rs(struct context* c, read_state rs, lbi* new_en
     }
     return sto;
 }
-
 value parse_value(context* c, char* str) {
     //Setup a dummy line buffer. We're calling alloca with sizes known at compile-time, don't get mad at me.
     line_buffer lb;
@@ -2606,53 +2520,46 @@ value parse_value(context* c, char* str) {
     lb.lines[0] = str;
     lb.line_sizes[0] = strlen(str);
     lb.n_lines = 1;
-    read_state rs;
-    rs.b = &lb;
-    rs.start = make_lbi(0,0);
-    rs.end = make_lbi(0, rs.b->line_sizes[0]);
-
-    return parse_value_rs(c, rs, NULL);
+    return parse_value_rs(c, make_read_state(&lb, make_lbi(0,0), make_lbi(0, lb.line_sizes[0])), NULL);
 }
-
 void setup_builtins(struct context* c) {
     //create builtins
     set_value(c, "false",	make_val_num(0), 0);
     set_value(c, "true",	make_val_num(1), 0);//create horrible (if amusing bugs when someone tries to assign to true or false
-    set_value(c, "typeof", 	make_val_func("typeof", 1, &get_type), 0);
-    set_value(c, "len", 	make_val_func("len", 3, &get_len), 0);
-    set_value(c, "range", 	make_val_func("range", 1, &make_range), 0);
-    set_value(c, "linspace", 	make_val_func("linspace", 3, &make_linspace), 0);
-    set_value(c, "flatten", 	make_val_func("flatten", 1, &flatten_list), 0);
-    set_value(c, "array", 	make_val_func("array", 1, &make_array), 0);
-    set_value(c, "vec", 	make_val_func("vec", 1, &make_vec), 0);
-    set_value(c, "cat", 	make_val_func("cat", 1, &concatenate), 0);
-    set_value(c, "print", 	make_val_func("print", 1, &print), 0);
+    ADD_SPECL_FN(c, spcl_typeof,	"typeof");
+    ADD_SPECL_FN(c, spcl_len,		"len");
+    ADD_SPECL_FN(c, spcl_range,		"range");
+    ADD_SPECL_FN(c, spcl_linspace,	"linspace");
+    ADD_SPECL_FN(c, spcl_flatten,	"flatten");
+    ADD_SPECL_FN(c, spcl_array,		"array");
+    ADD_SPECL_FN(c, spcl_vec,		"vec");
+    ADD_SPECL_FN(c, spcl_cat,		"cat");
+    ADD_SPECL_FN(c, spcl_print,		"print");
     //math stuff
     value tmp = make_val_inst(c, "math");
     context* math_c = tmp.val.c;
     set_value(math_c, "pi", 	make_val_num(M_PI), 0);
     set_value(math_c, "e", 	make_val_num(M_E), 0);
-    set_value(math_c, "sin", 	make_val_func("sin", 1, &fun_sin), 0);
-    set_value(math_c, "cos", 	make_val_func("cos", 1, &fun_cos), 0);
-    set_value(math_c, "tan", 	make_val_func("tan", 1, &fun_tan), 0);
-    set_value(math_c, "exp", 	make_val_func("exp", 1, &fun_exp), 0);
-    set_value(math_c, "arcsin", make_val_func("arcsin", 1, &fun_asin), 0);
-    set_value(math_c, "arccos", make_val_func("arccos", 1, &fun_acos), 0);
-    set_value(math_c, "arctan", make_val_func("arctan", 1, &fun_atan), 0);
-    set_value(math_c, "log", 	make_val_func("log", 1, &fun_log), 0);
-    set_value(math_c, "sqrt", 	make_val_func("sqrt", 1, &fun_sqrt), 0);
+    ADD_SPECL_FN(math_c, spcl_sin,	"sin");
+    ADD_SPECL_FN(math_c, spcl_cos,	"cos");
+    ADD_SPECL_FN(math_c, spcl_tan,	"tan");
+    ADD_SPECL_FN(math_c, spcl_exp,	"exp");
+    ADD_SPECL_FN(math_c, spcl_asin,	"asin");
+    ADD_SPECL_FN(math_c, spcl_acos,	"acos");
+    ADD_SPECL_FN(math_c, spcl_atan,	"atan");
+    ADD_SPECL_FN(math_c, spcl_log,	"log");
+    ADD_SPECL_FN(math_c, spcl_sqrt,	"sqrt");
     set_value(c, "math", tmp, 0);
 }
-
 value lookup(const struct context* c, const char* str) {
-    size_t i;
-    if (find_ind(c, str, SIZE_MAX, &i))
-	return c->table[i].val;
-    //try searching through the parent if that didn't work
-    if (c->parent)
-	return lookup(c->parent, str);
-    //reaching this point in execution means the matching entry wasn't found
-    return make_val_undef();
+    //Setup a dummy line buffer. We're calling alloca with sizes known at compile-time, don't get mad at me.
+    line_buffer lb;
+    lb.lines = alloca(sizeof(char*));
+    lb.line_sizes = alloca(sizeof(size_t));
+    lb.lines[0] = str;
+    lb.line_sizes[0] = strlen(str);
+    lb.n_lines = 1;
+    return lookup_rs( c, make_read_state(&lb, make_lbi(0,0), make_lbi(0, lb.line_sizes[0])) );
 }
 int lookup_object(const context* c, const char* str, const char* typename, context** sto) {
     value vobj = lookup(c, str);
@@ -2745,7 +2652,7 @@ value read_from_lines(struct context* c, const line_buffer* b) {
     lbi end;
     read_state rs = make_read_state(b, make_lbi(0,0), make_lbi(0,0));
     //iterate over each line in the file
-    while (rs.start.line < b->n_lines) {
+    while (lbicmp(rs.start, lb_end(rs.b)) < 0) {
 	rs.end = make_lbi(rs.start.line, b->line_sizes[rs.start.line]);
 	er = parse_value_rs(c, rs, &end);
 	if (er.type == VAL_ERR) {
@@ -2757,6 +2664,30 @@ value read_from_lines(struct context* c, const line_buffer* b) {
 	rs.start = lb_add(b, end, 1);
     }
     return er;
+}
+
+context* context_from_file(const char* fname, int argc, char** argv, value* error) {
+    //create a new context
+    context* ret = make_context(NULL);
+    if (!ret)
+	return ret;
+    //read command line arguments
+    value er;
+    for (int i = 0; argv && i < argc; ++i) {
+	er = parse_value(ret, argv[i]);
+	if (er.type == VAL_ERR) {
+	    fprintf(stderr, "Error %s in option %d: %s\n", errnames[er.val.e->c], i, er.val.e->msg);
+	    if (error)
+		*error = er;
+	}
+    }
+    //read the rest of the file
+    line_buffer* lb = make_line_buffer(fname);
+    er = read_from_lines(ret, lb);
+    if (error)
+	*error = er;
+    destroy_line_buffer(lb);
+    return ret;
 }
 
 /** ============================ user_func ============================ **/

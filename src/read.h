@@ -41,7 +41,7 @@ typedef unsigned int _uint;
 typedef unsigned char _uint8;
 
 typedef enum { E_SUCCESS, E_NOFILE, E_LACK_TOKENS, E_BAD_TOKEN, E_BAD_SYNTAX, E_BAD_VALUE, E_BAD_TYPE, E_NOMEM, E_NAN, E_UNDEF, E_OUT_OF_RANGE, N_ERRORS } parse_ercode;
-typedef enum {VAL_UNDEF, VAL_ERR, VAL_NUM, VAL_STR, VAL_ARRAY, VAL_MAT, VAL_LIST, VAL_FUNC, VAL_INST, N_VALTYPES} valtype;
+typedef enum {VAL_UNDEF, VAL_ERR, VAL_NUM, VAL_STR, VAL_ARRAY, VAL_MAT, VAL_LIST, VAL_FUNC, VAL_INST, VAL_ANY, N_VALTYPES} valtype;
 const char* const errnames[N_ERRORS] = {"SUCCESS", "FILE_NOT_FOUND", "LACK_TOKENS", "BAD_TOKEN", "BAD_SYNTAX", "BAD_VALUE", "BAD_TYPE", "NOMEM", "NAN", "UNDEF", "OUT_OF_BOUNDS"};
 const char* const valnames[N_VALTYPES] = {"undefined", "error", "numeric", "string", "array", "list", "function", "object"};
 //helper classes and things
@@ -59,23 +59,6 @@ inline void* xrealloc(void* p, size_t nsize) {
 //generic stack class
 #define TYPED_A(NAME,TYPE) NAME##TYPE
 #define TYPED(NAME,TYPE) TYPED_A(NAME, _##TYPE)
-#define WRAP_MATH_FN(FN) value TYPED(fun,FN)(struct context* c, func_call f) {		\
-    value sto = check_signature(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG);	\
-    if (sto.type == 0)									\
-	return make_val_num( FN(f.args[0].val.val.x) );					\
-    cleanup_val(&sto);									\
-    sto = check_signature(f, SIGLEN(MATHA_SIG), SIGLEN(MATHA_SIG), MATHA_SIG);		\
-    if (sto.type == 0) {								\
-	sto.type = VAL_ARRAY;								\
-	sto.n_els = f.args[0].val.n_els;						\
-	sto.val.a = malloc(sizeof(double)*sto.n_els);					\
-	if (!sto.val.a)									\
-	    return make_val_error(E_NOMEM, "");						\
-	for (size_t i = 0; i < f.args[0].val.n_els; ++i)				\
-	    sto.val.a[i] = FN(f.args[0].val.val.a[i]);					\
-    }											\
-    return sto;										\
-}
 #define TYPED3(NAME,TA,TB) TYPED(TYPED_A(NAME,_##TA),TB)
 #define PAIR_DEF(TA,TB) struct TYPED3(PAIR,TA,TB) {					\
     TA a;										\
@@ -159,8 +142,62 @@ int TYPED(STACK_PEEK,TYPE)(stack(TYPE)* s, size_t ind, TYPE* sto) {			\
  */
 #define peek(TYPE) TYPED(STACK_PEEK,TYPE)
 
+/**
+ * Wrap a mathematical function that takes a single floating point argument
+ * FN: the function to wrap
+ */
+#define WRAP_MATH_FN(FN) value TYPED(spcl,FN)(struct context* c, func_call f) {		\
+    value sto = get_sigerr(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG);		\
+    if (sto.type == 0)									\
+	return make_val_num( FN(f.args[0].val.val.x) );					\
+    cleanup_val(&sto);									\
+    sto = get_sigerr(f, SIGLEN(MATHA_SIG), SIGLEN(MATHA_SIG), MATHA_SIG);		\
+    if (sto.type == 0) {								\
+	sto.type = VAL_ARRAY;								\
+	sto.n_els = f.args[0].val.n_els;						\
+	sto.val.a = malloc(sizeof(double)*sto.n_els);					\
+	if (!sto.val.a)									\
+	    return make_val_error(E_NOMEM, "");						\
+	for (size_t i = 0; i < f.args[0].val.n_els; ++i)				\
+	    sto.val.a[i] = FN(f.args[0].val.val.a[i]);					\
+    }											\
+    return sto;										\
+}
+
+/**
+ * provides a handy macro which wraps get_sigerr and aborts execution of a function if an invalid signature was detected
+ * FUNC: the name of the function
+ * SIGNATURE: a constant array of valtypes. Each argument in the function FUNC is tested to make sure it is of the appropriate type. You may include VAL_UNDEF in this array as a wildcard
+ */
+#define SIGCHECK(FUNC, SIGNATURE) \
+    value er = get_sigerr(FUNC, SIGLEN(SIGNATURE), SIGLEN(SIGNATURE), SIGNATURE); \
+    if (er.type == VAL_ERR) return er
+/**
+ * Acts like SIGCHECK, but allows for optional arguments.
+ * FUNC: the name of the function
+ * MIN_ARGS: the minimum number of arguments that may be accepted
+ * SIGNATURE: the signature of all arguments, including optional ones
+ */
+#define SIGCHECK_OPTS(FUNC, MIN_ARGS, SIGNATURE) \
+    value er = get_sigerr(FUNC, MIN_ARGS, SIGLEN(SIGNATURE), SIGNATURE); \
+    if (er.type == VAL_ERR) return er
+/**
+ * register a function FUNC to the context CON with the name NAME
+ * CON: the context to add the function to
+ * FUNC: the C function to add
+ * NAME: the name of the function when calling from a specl script
+ */
+#define ADD_SPECL_FN(CON, FUNC, NAME) set_value(CON, NAME, make_val_func(NAME, 1, &FUNC), 0);
+
 /** ======================================================== utility functions ======================================================== **/
 
+/**
+ * Works similarly to strncmp, but ignores leading and tailing whitespace and returns a negative value if strlen(b)<n or a positive value if strlen(b)>n
+ * a: the first string
+ * b: the second string
+ * n: match at most n characters
+ */
+int namecmp(const char* a, const char* b, size_t n);
 /**
  * This acts similar to getline, but stops at a semicolon, newline (unless preceeded by a \), {, or }.
  * bufptr: a pointer to which the buffer is saved. If bufptr is NULL than a new buffer is allocated through malloc()
@@ -183,14 +220,6 @@ int write_numeric(char* str, size_t n, double x);
  * NOTE: The input string str is modified and the returned value uses memory allocated for str. Thus, the caller must ensure that str has a lifetime at least as long as the used string. Users should not try to call free() on any of the strings in the list, only the list itself.
  */
 char** csv_to_list(char* str, char sep, size_t* listlen);
-/*
- * helper function for parse_value which appends at most n characters from the string str to line while dynamically resizing the buffer if necessary
- * line: the line to save to
- * line_off: the current end of line
- * line_size: the size in memory allocated for line
- * n: the maximum number of characters to write
- */
-char* append_to_line(char* line, size_t* line_off, size_t* line_size, const char* str, size_t n);
 
 /** ============================ line_buffer ============================ **/
 
@@ -212,10 +241,12 @@ typedef struct line_buffer {
     size_t n_lines;
 } line_buffer;
 void destroy_line_buffer(line_buffer* lb);
-line_buffer* make_line_buffer_file(const char* p_fname);
-line_buffer* make_line_buffer_lines(const char** p_lines, size_t pn_lines);
-line_buffer* make_line_buffer_sep(const char* line, char sep);
+line_buffer* make_line_buffer(const char* p_fname);
 line_buffer* copy_line_buffer(const line_buffer* o);
+/**
+ * Get the index of the end of the line buffer represented by lb.
+ */
+lbi lb_end(const line_buffer* lb);
 void lb_split(line_buffer* lb, char split_delim);
 #if DEBUG_INFO>0
 int it_single(const line_buffer* lb, char** linesto, char start_delim, char end_delim, lbi* start, lbi* end, int* pdepth, int include_delims, int include_start);
@@ -560,6 +591,15 @@ value parse_value(struct context* c, char* str);
  * returns: an error if one was found or an undefined value on success
  */
 value read_from_lines(struct context* c, const line_buffer* b);
+/**
+ * Create a new context initialized with the contents of fname and optional command line arguments
+ * fname: the name of the file to read
+ * argc: the number arguments
+ * argv: an array of arguments taken from the command-line. Note that callers should not directly pass argc,argv from int main(). Rather, argv should only include valid speclang commands. If you know that speclang commands start at the index i, then you should call context_from_file(fname, argc-i, argv+(size_t)i).
+ * error: if not NULL, errors are saved to this pointer.
+ * returns: a newly created context with the contents of fname and argv. The caller is responsible for deallocating memory by calling destroy_context().
+ */
+context* context_from_file(const char* fname, int argc, char** argv, value* error);
 
 /** ============================ user_func ============================ **/
 
@@ -610,35 +650,30 @@ value uf_eval(user_func* uf, context* c, func_call call);
  * sig: the first f.n_args arguments in f (assuming min_args<=f.n_args<max_args) must match the specified signature. This array must be large enough to hold max_args
  * returns: an error with an appropriate message or undefined if there was no error
  */
-value check_signature(func_call f, size_t min_args, size_t max_args, const valtype* sig);
+value get_sigerr(func_call f, size_t min_args, size_t max_args, const valtype* sig);
 /**
  * Get the type of a value
  */
-value get_type(struct context* c, func_call tmp_f);
+value specl_typeof(struct context* c, func_call tmp_f);
 /**
  * Make a range following python syntax. If one argument is supplied then a list with tmp_f.args[0] elements is created starting at index 0 and going up to (but not including) tmp_f.args[0]. If two arguments are supplied then the range is from (tmp_f.args[0], tmp_f.args[1]). If three arguments are supplied then the range (tmp_f.args[0], tmp_f.args[1]) is still returned, but now the spacing between successive elements is tmp_f.args[2].
  */
-value make_range(struct context* c, func_call tmp_f);
+value specl_range(struct context* c, func_call tmp_f);
 /**
  * linspace(a, b, n) Create a list of n equally spaced real numbers starting at a and ending at b. This function must be called with three aguments unlike np.linspace. Note that the value b is included in the list
  */
-value make_linspace(struct context* c, func_call tmp_f);
+value specl_linspace(struct context* c, func_call tmp_f);
 /**
  * Take a list value and flatten it so that it has numpy dimensions (n) where n is the sum of the length of each list in the base list. values are copied in order e.g flatten([0,1],[2,3]) -> [0,1,2,3]
  * func_call: the function with arguments passed
  */
-value flatten_list(struct context* c, func_call tmp_f);
+value specl_flatten(struct context* c, func_call tmp_f);
 /**
  * Take a list value and flatten it so that it has numpy dimensions (n) where n is the sum of the length of each list in the base list. values are copied in order e.g flatten([0,1],[2,3]) -> [0,1,2,3]
  * func_call: the function with arguments passed
  */
-value concatenate(struct context* c, func_call tmp_f);
-value print(struct context* c, func_call tmp_f);
-value fun_sin(struct context* c, func_call tmp_f);
-value fun_cos(struct context* c, func_call tmp_f);
-value fun_tan(struct context* c, func_call tmp_f);
-value fun_exp(struct context* c, func_call tmp_f);
-value fun_sqrt(struct context* c, func_call tmp_f);
+value specl_cat(struct context* c, func_call tmp_f);
+value specl_print(struct context* c, func_call tmp_f);
 value errtype(struct context* c, func_call tmp_f);
 
 #endif //READ_H
