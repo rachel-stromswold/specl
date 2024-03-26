@@ -142,27 +142,27 @@ TEST_CASE("value parsing") {
 	{
 	    //check the first sublist
 	    value element = tmp_val.val.l[0];
-	    CHECK(element.type == VAL_LIST);
-	    CHECK(element.n_els == 2);
-	    CHECK(element.val.l != NULL);
+	    REQUIRE(element.type == VAL_LIST);
+	    REQUIRE(element.n_els == 2);
+	    REQUIRE(element.val.l != NULL);
 	    CHECK(element.val.l[0].type == VAL_NUM);
 	    CHECK(element.val.l[0].val.x == 0);
 	    CHECK(element.val.l[1].type == VAL_NUM);
 	    CHECK(element.val.l[1].val.x == 2);
 	    //check the second sublist
 	    element = tmp_val.val.l[1];
-	    CHECK(element.type == VAL_LIST);
-	    CHECK(element.n_els == 2);
-	    CHECK(element.val.l != NULL);
+	    REQUIRE(element.type == VAL_LIST);
+	    REQUIRE(element.n_els == 2);
+	    REQUIRE(element.val.l != NULL);
 	    CHECK(element.val.l[0].type == VAL_NUM);
 	    CHECK(element.val.l[0].val.x == 1);
 	    CHECK(element.val.l[1].type == VAL_NUM);
 	    CHECK(element.val.l[1].val.x == 3);
 	    //check the third sublist
 	    element = tmp_val.val.l[2];
-	    CHECK(element.type == VAL_LIST);
-	    CHECK(element.n_els == 4);
-	    CHECK(element.val.l != NULL);
+	    REQUIRE(element.type == VAL_LIST);
+	    REQUIRE(element.n_els == 4);
+	    REQUIRE(element.val.l != NULL);
 	    CHECK(element.val.l[0].type == VAL_NUM);
 	    CHECK(element.val.l[0].val.x == 1);
 	    CHECK(element.val.l[1].type == VAL_NUM);
@@ -176,9 +176,9 @@ TEST_CASE("value parsing") {
 	//test nested list interpretations
 	strncpy(buf, "[[x*y for x in range(1,6)] for y in range(5)]", BUF_SIZE);buf[BUF_SIZE-1] = 0;
 	tmp_val = parse_value(sc, buf);
-	CHECK(tmp_val.type == VAL_LIST);
-	CHECK(tmp_val.val.l != NULL);
-	CHECK(tmp_val.n_els == 5);
+	REQUIRE(tmp_val.type == VAL_LIST);
+	REQUIRE(tmp_val.val.l != NULL);
+	REQUIRE(tmp_val.n_els == 5);
 	for (size_t yy = 0; yy < tmp_val.n_els; ++yy) {
 	    CHECK(tmp_val.val.l[yy].type == VAL_LIST);
 	    CHECK(tmp_val.val.l[yy].n_els == 5);

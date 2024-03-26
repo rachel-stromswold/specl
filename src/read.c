@@ -359,11 +359,11 @@ int lbicmp(lbi l, lbi r) {
 }
 
 static inline read_state make_read_state(const line_buffer* lb, lbi s, lbi e) {
-    read_state ret;
-    ret.b = lb;
-    ret.pos = s;
-    ret.end = e;
-    return ret;
+    read_state rs;
+    rs.b = lb;
+    rs.start = s;
+    rs.end = e;
+    return rs;
 }
 
 /** ============================ line_buffer ============================ **/
@@ -1207,7 +1207,6 @@ value make_val_list(const value* vs, size_t n_vs) {
     for (size_t i = 0; i < v.n_els; ++i) v.val.l[i] = copy_val(vs[i]);
     return v;
 }
-
 value make_val_func(const char* name, size_t n_args, value (*p_exec)(context*, func_call)) {
     value ret;
     ret.type = VAL_FUNC;
@@ -1812,7 +1811,6 @@ void cleanup_name_val_pair(name_val_pair nv) {
 
 //helper to convert possibly negative index values to real C indices
 static inline size_t index_to_abs(value* ind, size_t max_n) {
-    size_t ret = 0;
     if (-(ind->val.x) > max_n || ind->val.x >= max_n) {
 	*ind = make_val_error(E_OUT_OF_RANGE, "index %d out of bounds for list of size %lu", (int)ind->val.x, max_n);
 	return 0;
@@ -1946,7 +1944,13 @@ void destroy_context(struct context* c) {
     free(c->table);
     free(c);
 }
-
+//check whether the string determined by read_state is a valid variable name (i.e. it starts with a letter)
+static inline int is_name(read_state* rs) {
+    while (is_whitespace(lb_get(rs->b, rs->start)) && lbicmp(rs->start, rs->end) < 0)
+	rs->start = lb_add(rs->b, rs->start, 1);
+    char c = lb_get(rs->b, rs->start);
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
 /**
  * Get the location of the first operator which is not enclosed in a block expression
  * op_loc: store the location of the operator
@@ -1961,40 +1965,40 @@ static inline value find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi
     stack(char) blk_stk = make_stack(char)();
     //variable names are not allowed to start with '+', '-', or a digit and may not contain any '.' symbols. Use this to check whether the value is numeric
     char open_type, prev;
-    char cur = lb_get(rs.b, rs.pos);
-    int is_numeric = (cur == '+' || cur == '-' || cur == '.' || (cur >= '0' && cur <= '9'));
+    char cur = lb_get(rs.b, rs.start);
+    //int is_numeric = (cur == '+' || cur == '-' || cur == '.' || (cur >= '0' && cur <= '9'));
     cur = 0;
 
     //keep track of the precedence of the orders of operation (lower means executed later) ">,=,>=,==,<=,<"=4 "+,-"=3, "*,/"=2, "**"=1
     char op_prec = 0;
-    for (; lbicmp(rs.pos, rs.end) < 0; rs.pos = lb_add(rs.b, rs.pos, 1)) {
+    for (; lbicmp(rs.start, rs.end) < 0; rs.start = lb_add(rs.b, rs.start, 1)) {
 	prev = cur;
-	cur = lb_get(rs.b, rs.pos);
-	char next = lb_get(rs.b, lb_add(rs.b, rs.pos, 1));
-	if (cur == '[' || cur == '(' || cur == '{') {
+	cur = lb_get(rs.b, rs.start);
+	char next = lb_get(rs.b, lb_add(rs.b, rs.start, 1));
+	if (cur == '(' || cur == '{' || cur == '[') {
 	    push(char)(&blk_stk, cur);
 	    //only set the open index if this is the first match
-	    if (lbicmp(*open_ind, rs.end) == 0) *open_ind = rs.pos;
-	} else if (cur == '}' || cur == ')' || cur == ']') {
+	    if (lbicmp(*open_ind, rs.end) == 0) *open_ind = rs.start;
+	} else if (cur == ']' || cur == ')' || cur == '}') {
 	    if (pop(char)(&blk_stk, &open_type) || cur != get_match(open_type)) {
 		destroy_stack(char)(&blk_stk, NULL);
 		return make_val_error(E_BAD_SYNTAX, "unexpected %c", cur);
 	    }
-	    *close_ind = rs.pos;
+	    *close_ind = rs.start;
 	} else if (cur == '\"' && (prev != '\\')) {
 	    if (peek(char)(&blk_stk, 1, &open_type) || cur != get_match(open_type)) {
 		//quotes need to be handled in a special way
 		push(char)(&blk_stk, cur);
 		//only set the open index if this is the first match
-		if (lbicmp(*open_ind, rs.end) == 0) *open_ind = rs.pos;
+		if (lbicmp(*open_ind, rs.end) == 0) *open_ind = rs.start;
 	    } else {
 		pop(char)(&blk_stk, &open_type);
-		*close_ind = rs.pos;
+		*close_ind = rs.start;
 	    }
 	} else if (cur == '/') {
 	    //ignore everything after a comment
 	    if (next == '/') {
-		rs.pos.off = rs.b->line_sizes[rs.pos.line];
+		rs.start.off = rs.b->line_sizes[rs.start.line];
 		continue;
 	    }
 	}
@@ -2003,34 +2007,34 @@ static inline value find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi
 	    //check for operations with higher priorities (higher priorities indicated by op_prec are executed later in order of operations)
 	    if (cur == '=' && next != '=' && op_prec < 7) {
 		op_prec = 7;
-		*op_loc = rs.pos;
+		*op_loc = rs.start;
 	    } else if (((cur == '=' && next == '=') || cur == '>' || cur == '<') && op_prec < 6) {
 		op_prec = 6;
-		*op_loc = rs.pos;
+		*op_loc = rs.start;
 		//if this is a two character sequence like ==, >=, or <= we need to skip the next sign
 		if (next == '=')
-		    rs.pos = lb_add(rs.b, rs.pos, 1);
+		    rs.start = lb_add(rs.b, rs.start, 1);
 	    } else if ((cur == '!' || (cur == '&' && next == '&') || (cur == '|' && next == '|')) && op_prec < 5) {
 		op_prec = 5;
-		*op_loc = rs.pos;
+		*op_loc = rs.start;
 		//if this is a two character sequence like ==, >=, or <= we need to skip the next sign
 		if (next == '=')
-		    rs.pos = lb_add(rs.b, rs.pos, 1);
+		    rs.start = lb_add(rs.b, rs.start, 1);
 	    } else if ((cur == '+' || cur == '-') && prev != 'e' && prev != 0 && op_prec < 4) {
 		//remember to recurse after we finish looping
 		op_prec = 4;
-		*op_loc = rs.pos;
+		*op_loc = rs.start;
 	    } else if (cur == '^' && op_prec < 3) {
 		op_prec = 3;
-		*op_loc = rs.pos;
+		*op_loc = rs.start;
 	    } else if ((cur == '*' || cur == '/') && op_prec < 2) {
 		op_prec = 2;
-		*op_loc = rs.pos;
-	    } else if (op_prec < 1 && (cur == '?' || (cur == '.' && !is_numeric))) {
+		*op_loc = rs.start;
+	    } else if (op_prec < 1 && cur == '?') {
 		op_prec = 1;
-		*op_loc = rs.pos;
+		*op_loc = rs.start;
 	    } else if (cur == ';') {
-		*new_end = rs.pos;
+		*new_end = rs.start;
 	    }
 	}
     }
@@ -2047,32 +2051,75 @@ static inline value parse_value_rs(context* c, read_state rs, lbi* new_end);
 /**
  * An alternative to lookup which only considers the first n bytes in str
  */
-static inline value lookupn(const struct context* c, const char* str, size_t n) {
-    //TODO: make this directly access members and dereference arrays
-    size_t i;
-    if (find_ind(c, str, n, &i))
-	return c->table[i].val;
-    //try searching through the parent if that didn't work
-    if (c->parent)
-	return lookupn(c->parent, str, n);
-    //reaching this point in execution means the matching entry wasn't found
-    return make_val_undef();
+static inline value lookup_rs(context* c, read_state rs) {
+    lbi dot_loc = strchr_block_rs(rs.b, rs.start, rs.end, '.');
+    lbi ref_loc = strchr_block_rs(rs.b, rs.start, rs.end, '[');//]
+    if (!lbicmp(dot_loc, rs.end) && !lbicmp(ref_loc, rs.end)) {
+	//if there was neither a period or open brace, just lookup directly
+	size_t i, n;
+	char* str = trim_whitespace(lb_get_line(rs.b, rs.start, rs.end, NULL), &n);
+	while (c) {
+	    if (find_ind(c, str, n, &i)) {
+		free(str);
+		return c->table[i].val;
+	    }
+	    //go up if we didn't find it
+	    c = c->parent;
+	}
+	free(str);
+	//reaching this point in execution means the matching entry wasn't found
+	return make_val_undef();
+    } else if (lbicmp(dot_loc, ref_loc) < 0) {
+	//if there was a dot, access context members
+	value sub_con = lookup_rs(c, make_read_state(rs.b, rs.start, dot_loc));
+	if (sub_con.type != VAL_INST)
+	    return make_val_error(E_BAD_TYPE, "cannot access member from non instance type %s", valnames[sub_con.type]);
+	return lookup_rs(sub_con.val.c, make_read_state(rs.b, lb_add(rs.b,dot_loc,1), rs.end));
+    } else {
+	//access lists/arrays
+	lbi close_ind = strchr_block_rs(rs.b, lb_add(rs.b, ref_loc, 1), rs.end, /*[*/']');
+	if (lbicmp(close_ind, rs.end) > 0)
+	    return make_val_error(E_BAD_SYNTAX, /*[*/"expected ']'");
+	//read the index
+	value index = parse_value_rs(c, make_read_state(rs.b, lb_add(rs.b, ref_loc, 1), close_ind), NULL);
+	if (index.type == VAL_ERR)
+	    return index;
+	if (index.type != VAL_NUM)
+	    return make_val_error(E_BAD_TYPE, "cannot index list with type %s", valnames[index.type]);
+	//read the list and convert to an absolute index
+	value lst = lookup_rs(c, make_read_state(rs.b, rs.start, ref_loc));
+	size_t i = index_to_abs(&index, lst.n_els);
+	//branch based on type
+	if (lst.type == VAL_LIST || lst.type == VAL_MAT) {
+	    //the user might want to access a variable in a list of objects, handle that case
+	    if (lbicmp(dot_loc, rs.end) < 0) {
+		if (lst.val.l[i].type != VAL_INST)
+		    return make_val_error(E_BAD_TYPE, "cannot access member from non instance type %s", valnames[lst.val.l[i].type]);
+		return lookup_rs(lst.val.l[i].val.c, make_read_state(rs.b, lb_add(rs.b, close_ind, 1), rs.end));
+	    }
+	    return lst.val.l[i];
+	} else if (lst.type == VAL_ARRAY) {
+	    return make_val_num(lst.val.a[i]);
+	} else {
+	    return make_val_error(E_BAD_TYPE, "cannot index type %s", valnames[lst.type]);
+	}
+    }
 }
 /**
  * similar to set_value(), but read in place from a read state
  */
 static inline value set_value_rs(struct context* c, read_state rs, value p_val) {
-    lbi dot_loc = strchr_block_rs(rs.b, rs.pos, rs.end, '.');
-    lbi ref_loc = strchr_block_rs(rs.b, rs.pos, rs.end, '[');//]
+    lbi dot_loc = strchr_block_rs(rs.b, rs.start, rs.end, '.');
+    lbi ref_loc = strchr_block_rs(rs.b, rs.start, rs.end, '[');//]
     //if there are no dereferences, just access the table directly
     if (!lbicmp(dot_loc, rs.end) && !lbicmp(ref_loc, rs.end)) {
-	char* str = trim_whitespace(lb_get_line(rs.b, rs.pos, rs.end, NULL), NULL);
+	char* str = trim_whitespace(lb_get_line(rs.b, rs.start, rs.end, NULL), NULL);
 	set_value(c, str, p_val, 0);
 	free(str);
 	return make_val_undef();
     } else if (lbicmp(dot_loc, ref_loc) < 0) {
 	//access context members
-	value sub_con = lookupn(c, rs.b->lines[rs.pos.line]+rs.pos.off, dot_loc.off-rs.pos.off);
+	value sub_con = lookup_rs(c, make_read_state(rs.b, rs.start, dot_loc));
 	if (sub_con.type != VAL_INST)
 	    return make_val_error(E_BAD_TYPE, "cannot access member from non instance type %s", valnames[sub_con.type]);
 	return set_value_rs(sub_con.val.c, make_read_state(rs.b, lb_add(rs.b, dot_loc, 1), rs.end), p_val);
@@ -2082,11 +2129,11 @@ static inline value set_value_rs(struct context* c, read_state rs, value p_val) 
 	if (lbicmp(close_ind, rs.end) > 0) return make_val_error(E_BAD_SYNTAX, /*[*/"expected ']'");
 	//read the index
 	value index = parse_value_rs(c, make_read_state(rs.b, lb_add(rs.b, ref_loc, 1), close_ind), NULL);
+	if (index.type == VAL_ERR) return index;
 	if (index.type != VAL_NUM) return make_val_error(E_BAD_TYPE, "cannot index list with type %s", valnames[index.type]);
 	//read the list and convert to an absolute index
-	value lst = lookupn(c, rs.b->lines[rs.pos.line]+rs.pos.off, ref_loc.off-rs.pos.off);
+	value lst = lookup_rs(c, make_read_state(rs.b, rs.start, ref_loc));
 	size_t i = index_to_abs(&index, lst.n_els);
-	if (index.type == VAL_ERR) return index;
 	//branch based on type
 	if (lst.type == VAL_LIST || lst.type == VAL_MAT) {
 	    //the user might want to access a variable in a list of objects, handle that case
@@ -2104,6 +2151,7 @@ static inline value set_value_rs(struct context* c, read_state rs, value p_val) 
 	    return make_val_error(E_BAD_TYPE, "cannot index type %s", valnames[lst.type]);
 	}
     }
+    return make_val_undef();
 }
 #if DEBUG_INFO<1
 static inline
@@ -2122,7 +2170,7 @@ value do_op(context* c, read_state rs, lbi op_loc) {
     read_state rs_l = rs;
     read_state rs_r = rs;
     rs_l.end = op_loc;
-    rs_r.pos = lb_add(rs.b, op_loc, op_width);
+    rs_r.start = lb_add(rs.b, op_loc, op_width);
     if (op == '?') {
 	//ternary operators and dereferences are special cases
 	//the colon must be present
@@ -2135,7 +2183,7 @@ value do_op(context* c, read_state rs, lbi op_loc) {
 	    return l;
 	//0 branch
 	if (l.type == VAL_UNDEF || l.val.x == 0) {
-	    rs_r.pos = lb_add(rs.b, col_loc, 1);
+	    rs_r.start = lb_add(rs.b, col_loc, 1);
 	    sto = parse_value_rs(c, rs_r, NULL);
 	    return sto;
 	} else {
@@ -2144,15 +2192,6 @@ value do_op(context* c, read_state rs, lbi op_loc) {
 	    sto = parse_value_rs(c, rs_r, NULL);
 	    return sto;
 	}
-    } else if (op == '.') {
-	//dereferencing subvariables
-	lbi s = find_token_before(rs.b, op_loc, rs.pos);
-	if (s.line != op_loc.line)
-	    return make_val_error(E_BAD_SYNTAX, "unexpected line break");
-	value inst_val = lookupn(c, lb_read(rs.b, s), op_loc.off - s.off);
-	if (inst_val.type != VAL_INST)
-	    return make_val_error(E_BAD_TYPE, "tried to find %s in non-instance type %s", lb_read(rs.b, op_loc), valnames[inst_val.type]);
-	return parse_value_rs(inst_val.val.c, rs_r, NULL);
     } else if (op == '=' && op_width == 1) {
 	//assignments
 	value tmp_val = parse_value_rs(c, rs_r, NULL);
@@ -2224,7 +2263,7 @@ value do_op(context* c, read_state rs, lbi op_loc) {
 	}
 	//if this is a relative assignment, do that
 	if (next == '=') {
-	    char* str = trim_whitespace(lb_get_line(rs.b, rs_l.pos, rs_l.end, NULL), NULL);
+	    char* str = trim_whitespace(lb_get_line(rs.b, rs_l.start, rs_l.end, NULL), NULL);
 	    set_value(c, str, l, 0);
 	    free(str);
 	    l = make_val_undef();
@@ -2269,7 +2308,7 @@ static inline struct for_state make_for_state(context* c, read_state rs, lbi for
 	free(fs.var_name);
 	return fs;
     }
-    fs.expr_name = make_read_state(rs.b, lb_add(rs.b, rs.pos, 1), fs.for_start);
+    fs.expr_name = make_read_state(rs.b, lb_add(rs.b, rs.start, 1), fs.for_start);
     //we need to add a variable with the appropriate name to loop over. We write a value and save the value there before so we can remove it when we're done
     find_ind(c, fs.var_name, SIZE_MAX, &(fs.var_ind));
     fs.prev = c->table[fs.var_ind];
@@ -2286,37 +2325,6 @@ static inline void finish_for_state(context* c, struct for_state fs) {
 }
 //helper for parse_value to hand list literals
 static inline value parse_literal_list(struct context* c, read_state rs, lbi open_ind, lbi close_ind) {
-    //if the string is empty then we're creating a new list, otherwise we're accessing an existing list
-    if (lbicmp(rs.pos, open_ind) < 0) {
-	//check if this is actually dereferencing from a list. this technically isn't a literal so I lied
-	lbi s = find_token_before(rs.b, open_ind, rs.pos);
-	if (s.line != open_ind.line)
-	    return make_val_error(E_BAD_SYNTAX, "unexpected line break");
-	value lst = lookupn(c, rs.b->lines[s.line]+s.off, open_ind.off-s.off);
-	if (lst.type != VAL_LIST && lst.type != VAL_ARRAY && lst.type != VAL_MAT) {
-	    cleanup_val(&lst);
-	    return make_val_error(E_BAD_TYPE, "tried to index from non list type %s", valnames[lst.type]);
-	}
-	value contents = parse_value_rs(c, make_read_state(rs.b, lb_add(rs.b, open_ind, 1), close_ind), NULL);
-	//check that we found the list and that it was valid
-	if (contents.type != VAL_NUM)
-	    return make_val_error(E_BAD_SYNTAX, "only integers are valid indices\n");
-	//now figure out the index
-	long tmp = (long)(contents.val.x);
-	if (tmp < 0) tmp = lst.n_els+tmp;
-	if (tmp < 0)
-	    return make_val_error(E_OUT_OF_RANGE, "index %d is out of range for list of size %lu.\n", tmp, lst.n_els);
-	size_t ind = (size_t)tmp;
-	if (ind >= lst.n_els)
-	    return make_val_error(E_OUT_OF_RANGE, "index %d is out of range for list of size %lu.\n", tmp, lst.n_els);
-
-	if (lst.type == VAL_LIST || lst.type == VAL_MAT)
-	    return copy_val(lst.val.l[ind]);
-	else if (lst.type == VAL_ARRAY)
-	    return make_val_num(lst.val.a[ind]);
-	
-	return make_val_error(E_BAD_TYPE, "tried to access non-list");
-    }
     rs.end = close_ind;
     value sto;
     //read the coordinates separated by spaces
@@ -2446,9 +2454,9 @@ static inline value inds_to_nvp(context* c, const line_buffer* lb, name_val_pair
 //parse function definition/call statements
 static inline value parse_literal_func(struct context* c, read_state rs, lbi open_ind, lbi close_ind, lbi* new_end) {
     //check if this is a parenthetical expression
-    while ( is_whitespace(lb_get(rs.b, rs.pos)) && lbicmp(rs.pos, open_ind) )
-	rs.pos = lb_add(rs.b, rs.pos, 1);
-    if (lbicmp(rs.pos, open_ind) == 0)
+    while ( is_whitespace(lb_get(rs.b, rs.start)) && lbicmp(rs.start, open_ind) )
+	rs.start = lb_add(rs.b, rs.start, 1);
+    if (lbicmp(rs.start, open_ind) == 0)
 	return parse_value_rs(c, make_read_state(rs.b, lb_add(rs.b, open_ind, 1), close_ind), NULL);
     value sto = make_val_undef();
     rs.end = close_ind;
@@ -2461,13 +2469,13 @@ static inline value parse_literal_func(struct context* c, read_state rs, lbi ope
     if (f.n_args >= ARGS_BUF_SIZE)
 	return make_val_error(E_OUT_OF_RANGE, "speclang only supports at most %lu arguments in functions", ARGS_BUF_SIZE-1);
     //set up a function and figure out the function name 
-    lbi s = find_token_before(rs.b, open_ind, rs.pos);
+    lbi s = find_token_before(rs.b, open_ind, rs.start);
     if (s.line != open_ind.line)
 	return make_val_error(E_BAD_SYNTAX, "unexpected line break");
     size_t name_len;
     f.name = lb_get_line(rs.b, s, open_ind, &name_len);
     //check if this is a declaration
-    lbi func_start = token_block(rs.b, rs.pos, open_ind, "func", strlen("func"));
+    lbi func_start = token_block(rs.b, rs.start, open_ind, "func", strlen("func"));
     if (lbicmp(func_start, open_ind) < 0) {
 	//handle function declarations
 	sto.type = VAL_FUNC;
@@ -2478,7 +2486,7 @@ static inline value parse_literal_func(struct context* c, read_state rs, lbi ope
 	sto.val.f = make_user_func_lb(f, lb_get_enclosed(rs.b, close_ind, new_end, '{', '}', 0, 0));
     } else {
 	//handle function calls
-	value func_val = lookupn(c, f.name, name_len);
+	value func_val = lookup_rs(c, make_read_state(rs.b, s, open_ind));
 	if (func_val.type != VAL_FUNC) {
 	    cleanup_func(&f);
 	    free(arg_inds);
@@ -2538,13 +2546,8 @@ static inline value parse_value_rs(struct context* c, read_state rs, lbi* new_en
 	*new_end = rs.end;
     value sto = make_val_undef();
     //iterate until we hit a non whitespace character
-    while (is_whitespace(lb_get(rs.b, rs.pos))) {
-	//if we hit the end of the line without non-whitespace then return an undefined value
-	rs.pos = lb_add(rs.b, rs.pos, 1);
-	if (lbicmp(rs.pos, rs.end) >= 0)
-	    return sto;
-    }
-    if (lbicmp(rs.pos,rs.end) == 0)
+    int is_var = is_name(&rs);
+    if (lbicmp(rs.start, rs.end) >= 0)
 	return sto;
 
     //store locations of the first instance of different operators. We do this so we can quickly look up new operators if we didn't find any other operators of a lower precedence (such operators are placed in the tree first).
@@ -2555,19 +2558,21 @@ static inline value parse_value_rs(struct context* c, read_state rs, lbi* new_en
 
     //last try removing parenthesis 
     if (lbicmp(op_loc, rs.end) >= 0) {
-	size_t reset_ind = 0;
 	//if there isn't a valid parenthetical expression, then we should interpret this as a variable
 	if (lbicmp(open_ind, rs.end) == 0 || lbicmp(close_ind, rs.end) == 0) {
-	    char* str = trim_whitespace(lb_get_line(rs.b, rs.pos, rs.end, NULL), &reset_ind);
 	    //ensure that empty strings return undefined
-	    if (str[0] == 0) {
-		free(str);
-		return make_val_undef();
-	    }
-	    sto = lookupn(c, str, reset_ind);
-	    if (sto.type == VAL_UNDEF) {
-		//try interpreting as a number
+	    while (is_whitespace(lb_get(rs.b, rs.start)) && lbicmp(rs.start, rs.end) < 0)
+		rs.start = lb_add(rs.b, rs.start, 1);
+	    char cur = lb_get(rs.b, rs.start);
+	    if (cur == 0 || lbicmp(rs.start, rs.end) == 0)
+		return make_val_undef(); 
+	    if (is_var) {
+		//lookup variables
+		sto = copy_val( lookup_rs(c, make_read_state(rs.b, rs.start, rs.end)) );
+	    } else {
+		//interpret number literals
 		errno = 0;
+		char* str = lb_get_line(rs.b, rs.start, rs.end, NULL);
 		sto.val.x = strtod(str, NULL);
 		sto.n_els = 1;
 		if (errno) {
@@ -2575,15 +2580,14 @@ static inline value parse_value_rs(struct context* c, read_state rs, lbi* new_en
 		    free(str);
 		    return sto;
 		}
+		free(str);
 		sto.type = VAL_NUM;
 	    }
-	    free(str);
-	    sto = copy_val(sto); 
 	} else {
 	    //if there are enclosed blocks then we need to read those
 	    switch (lb_get(rs.b, open_ind)) {
 	    case '\"': sto.type = VAL_STR; sto.val.s = lb_get_line(rs.b, lb_add(rs.b, open_ind, 1), close_ind, &sto.n_els);sto.n_els += 1;break; //"
-	    case '[':  return parse_literal_list(c, rs, open_ind, close_ind);break; //]
+	    case '[':  return (is_var)? copy_val(lookup_rs(c, rs)) : parse_literal_list(c, rs, open_ind, close_ind);break; //]
 	    case '{':  return parse_literal_table(c, rs, open_ind, close_ind);break; //}
 	    case '(':  return parse_literal_func(c, rs, open_ind, close_ind, new_end);break; //)
 	    }
@@ -2604,7 +2608,7 @@ value parse_value(context* c, char* str) {
     lb.n_lines = 1;
     read_state rs;
     rs.b = &lb;
-    rs.pos = make_lbi(0,0);
+    rs.start = make_lbi(0,0);
     rs.end = make_lbi(0, rs.b->line_sizes[0]);
 
     return parse_value_rs(c, rs, NULL);
@@ -2741,16 +2745,16 @@ value read_from_lines(struct context* c, const line_buffer* b) {
     lbi end;
     read_state rs = make_read_state(b, make_lbi(0,0), make_lbi(0,0));
     //iterate over each line in the file
-    while (rs.pos.line < b->n_lines) {
-	rs.end = make_lbi(rs.pos.line, b->line_sizes[rs.pos.line]);
+    while (rs.start.line < b->n_lines) {
+	rs.end = make_lbi(rs.start.line, b->line_sizes[rs.start.line]);
 	er = parse_value_rs(c, rs, &end);
 	if (er.type == VAL_ERR) {
 	    if (c->parent == NULL)
-		fprintf(stderr, "Error %s on line %lu: %s\n", errnames[er.val.e->c], rs.pos.line+1, er.val.e->msg);
+		fprintf(stderr, "Error %s on line %lu: %s\n", errnames[er.val.e->c], rs.start.line+1, er.val.e->msg);
 	    return er;
 	}
 	cleanup_val(&er);
-	rs.pos = lb_add(b, end, 1);
+	rs.start = lb_add(b, end, 1);
     }
     return er;
 }

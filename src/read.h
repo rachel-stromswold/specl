@@ -461,7 +461,7 @@ typedef struct context context;
  */
 typedef struct read_state {
     const line_buffer* b;
-    lbi pos;
+    lbi start;
     lbi end;
 } read_state;
 
