@@ -358,6 +358,14 @@ int lbicmp(lbi l, lbi r) {
     return 0;
 }
 
+static inline read_state make_read_state(const line_buffer* lb, lbi s, lbi e) {
+    read_state ret;
+    ret.b = lb;
+    ret.pos = s;
+    ret.end = e;
+    return ret;
+}
+
 /** ============================ line_buffer ============================ **/
 
 /**
@@ -858,7 +866,7 @@ value get_type(struct context* c, func_call f) {
     value sto;
     sto.type = VAL_STR;
     if (f.n_args < 1)
-	return make_val_error(E_LACK_TOKENS, "typeof() called without arguments");
+	return make_val_error(E_LACK_TOKENS, "typeof() expected 1 argument, got 0");
     //handle instances as a special case
     if (f.args[0].val.type == VAL_INST) {
 	value t = lookup(f.args[0].val.val.c, "__type__");
@@ -876,6 +884,11 @@ value get_type(struct context* c, func_call f) {
     sto.n_els = strlen(valnames[f.args[0].val.type])+1;
     sto.val.s = strdup(valnames[f.args[0].val.type]);
     return sto;
+}
+value get_len(struct context* c, func_call f) {
+    if (f.n_args < 1)
+	return make_val_error(E_LACK_TOKENS, "len() expected 1 argument, got 0");
+    return make_val_num(f.args[0].val.n_els);
 }
 value make_range(struct context* c, func_call f) {
     static const valtype RANGE_SIG[] = {VAL_NUM, VAL_NUM, VAL_NUM};
@@ -900,7 +913,7 @@ value make_range(struct context* c, func_call f) {
 	return make_val_error(E_BAD_VALUE, "range(%f, %f, %f) with invalid increment", min, max, inc);
     sto.type = VAL_ARRAY;
     sto.n_els = (max - min) / inc;
-    sto.val.a = (double*)malloc(sizeof(double)*sto.n_els);
+    sto.val.a = malloc(sizeof(double)*sto.n_els);
     for (size_t i = 0; i < sto.n_els; ++i)
 	sto.val.a[i] = i*inc + min;
     return sto;
@@ -1797,14 +1810,28 @@ void cleanup_name_val_pair(name_val_pair nv) {
 
 /** ============================ context ============================ **/
 
+//helper to convert possibly negative index values to real C indices
+static inline size_t index_to_abs(value* ind, size_t max_n) {
+    size_t ret = 0;
+    if (-(ind->val.x) > max_n || ind->val.x >= max_n) {
+	*ind = make_val_error(E_OUT_OF_RANGE, "index %d out of bounds for list of size %lu", (int)ind->val.x, max_n);
+	return 0;
+    }
+    if (ind->val.x < 0)
+	return max_n - (size_t)(-ind->val.x);
+    return (size_t)(ind->val.x);
+}
+
 //non-cryptographically hash the string str reading only the first n bytes
 static inline size_t fnv_1(const char* str, size_t n, unsigned char t_bits) {
     if (str == NULL)
 	return 0;
     size_t ret = FNV_OFFSET;
     for (size_t i = 0; str[i] && i < n; ++i) {
-	ret = ret^str[i];
-	ret = ret*FNV_PRIME;
+	if (!is_whitespace(str[i])) {
+	    ret = ret^str[i];
+	    ret = ret*FNV_PRIME;
+	}
     }
     return ((ret >> t_bits) ^ ret) % (1 << t_bits);
     /**TODO: try using this if the above gives poor dispersion
@@ -1838,20 +1865,6 @@ static inline int find_ind(const struct context* c, const char* name, size_t n, 
     }
     *ind = i;
     return 0;
-}
-
-/**
- * An alternative to lookup which only considers the first n bytes in str
- */
-static inline value lookupn(const struct context* c, const char* str, size_t n) {
-    size_t i;
-    if (find_ind(c, str, n, &i))
-	return c->table[i].val;
-    //try searching through the parent if that didn't work
-    if (c->parent)
-	return lookupn(c->parent, str, n);
-    //reaching this point in execution means the matching entry wasn't found
-    return make_val_undef();
 }
 
 /**
@@ -1932,328 +1945,6 @@ void destroy_context(struct context* c) {
 	cleanup_name_val_pair(c->table[i]);
     free(c->table);
     free(c);
-}
-
-//forward declare so that helpers can call
-static inline value parse_value_rs(context* c, read_state rs, lbi* new_end);
-#if DEBUG_INFO<1
-static inline
-#endif
-value do_op(context* c, read_state rs, lbi op_loc) {
-    value sto = make_val_undef();
-    //some operators (==, >=, <=) take up more than one character, test for these
-    char op = lb_get(rs.b, op_loc);
-    char next = lb_get(rs.b, lb_add(rs.b, op_loc, 1));
-    int op_width = 1;
-    /*if ((op == '=' || op == '>' || op == '<' || op == '+' || op == '-') && next == '=')
-	op_width = 2;*/
-    //the expressions +=, -=, *=, /=, ==, >=, and <= are all valid, ?=, and .= are not
-    if (op != '?' && op != '.' && op != '|' && op != '&' && next == '=')
-	op_width = 2;
-    else if ((op == '|' || op == '&') && (next == op))
-	op_width = 2;
-    //set a read state before the operator and after the operator
-    read_state rs_l = rs;
-    read_state rs_r = rs;
-    rs_l.end = op_loc;
-    rs_r.pos = lb_add(rs.b, op_loc, op_width);
-    if (op == '?') {
-	//ternary operators and dereferences are special cases
-	//the colon must be present
-	lbi col_loc = strchr_block_rs(rs.b, op_loc, rs.end, ':');
-	if (lbicmp(col_loc, rs.end) >= 0)
-	    return make_val_error(E_BAD_SYNTAX, "expected ':' in ternary");
-
-	value l = parse_value_rs(c, rs_l, NULL);
-	if (l.type == VAL_ERR)
-	    return l;
-	//0 branch
-	if (l.type == VAL_UNDEF || l.val.x == 0) {
-	    rs_r.pos = lb_add(rs.b, col_loc, 1);
-	    sto = parse_value_rs(c, rs_r, NULL);
-	    return sto;
-	} else {
-	    //1 branch
-	    rs_r.end = col_loc;
-	    sto = parse_value_rs(c, rs_r, NULL);
-	    return sto;
-	}
-    } else if (op == '.') {
-	//dereferencing subvariables
-	lbi s = find_token_before(rs.b, op_loc, rs.pos);
-	if (s.line != op_loc.line)
-	    return make_val_error(E_BAD_SYNTAX, "unexpected line break");
-	value inst_val = lookupn(c, lb_read(rs.b, s), op_loc.off - s.off);
-	if (inst_val.type != VAL_INST)
-	    return make_val_error(E_BAD_TYPE, "tried to find %s in non-instance type %s", lb_read(rs.b, op_loc), valnames[inst_val.type]);
-	return parse_value_rs(inst_val.val.c, rs_r, NULL);
-    } else if (op == '=' && op_width == 1) {
-	//assignments
-	value tmp_val = parse_value_rs(c, rs_r, NULL);
-	if (tmp_val.type == VAL_ERR)
-	    return tmp_val;
-	char* str = trim_whitespace(lb_get_line(rs.b, rs_l.pos, rs_l.end, NULL), NULL);
-	set_value(c, str, tmp_val, 0);
-	free(str);
-	return make_val_undef();
-    } else if (op == '!' && op_width == 1) {
-	value tmp_val = parse_value_rs(c, rs_r, NULL);
-	if (tmp_val.type == VAL_ERR)
-	    return tmp_val;
-	if (tmp_val.type == VAL_UNDEF || (tmp_val.type == VAL_NUM && tmp_val.val.x == 0))
-	    return make_val_num(1);
-	return make_val_num(0);
-    }
-
-    //parse right and left values
-    value l = parse_value_rs(c, rs_l, NULL);
-    if (l.type == VAL_ERR)
-	return l;
-    value r = parse_value_rs(c, rs_r, NULL);
-    if (r.type == VAL_ERR) {
-	cleanup_val(&l);
-	return r;
-    }
-    //WLOG fix all array operations to have the array first
-    if (l.type == VAL_NUM && r.type == VAL_ARRAY)
-	swap_val(&l, &r);
-    sto.type = VAL_NUM;
-    sto.n_els = 1;
-    //handle equality comparisons
-    if (op == '!' || op == '=' || op == '>' || op == '<') {
-	value cmp = value_cmp(l,r);
-	cleanup_val(&l);
-	cleanup_val(&r);
-	if (cmp.type == VAL_ERR)
-	    return cmp;
-	if (op == '=')
-	    return make_val_num(!cmp.val.x);
-	if (op == '!')
-	    return cmp;
-	if (op == '>') {
-	    if (op_width == 2)
-		return make_val_num(cmp.val.x >= 0);
-	    return make_val_num(cmp.val.x > 0);
-	} else {
-	    if (op_width == 2)
-		return make_val_num(cmp.val.x <= 0);
-	    return make_val_num(cmp.val.x < 0);
-	}
-    } else if (op == '|' || op == '&') {
-	if (next != op)
-	    return make_val_error(E_BAD_SYNTAX, "invalid operation \'%c%c\'", op, next);
-	if (l.type == VAL_NUM && r.type == VAL_NUM)
-	    return (op == '|')? make_val_num(l.val.x || r.val.x) : make_val_num(l.val.x && r.val.x);
-	//undefined == false
-	if (l.type == VAL_UNDEF)
-	    return (op == '|')? make_val_num(r.val.x) : make_val_num(0);
-	if (r.type == VAL_UNDEF)
-	    return (op == '|')? make_val_num(1) : make_val_num(0);
-	return make_val_num(1);
-    } else {
-	//arithmetic is all relatively simple
-	switch(op) {
-	case '+': val_add(&l, r);break;
-	case '-': val_sub(&l, r);break;
-	case '*': if (next == '*') { val_exp(&l, r); } else { val_mul(&l, r); }break;
-	case '/': val_div(&l, r);break;
-	}
-	//if this is a relative assignment, do that
-	if (next == '=') {
-	    char* str = trim_whitespace(lb_get_line(rs.b, rs_l.pos, rs_l.end, NULL), NULL);
-	    set_value(c, str, l, 0);
-	    free(str);
-	    l = make_val_undef();
-	}
-	cleanup_val(&r);
-	return l;
-    }
-}
-
-void setup_builtins(struct context* c) {
-    //create builtins
-    set_value(c, "false",	make_val_num(0), 0);
-    set_value(c, "true",	make_val_num(1), 0);//create horrible (if amusing bugs when someone tries to assign to true or false
-    set_value(c, "typeof", 	make_val_func("typeof", 1, &get_type), 0);
-    set_value(c, "range", 	make_val_func("range", 1, &make_range), 0);
-    set_value(c, "linspace", 	make_val_func("linspace", 3, &make_linspace), 0);
-    set_value(c, "flatten", 	make_val_func("flatten", 1, &flatten_list), 0);
-    set_value(c, "array", 	make_val_func("array", 1, &make_array), 0);
-    set_value(c, "vec", 	make_val_func("vec", 1, &make_vec), 0);
-    set_value(c, "cat", 	make_val_func("cat", 1, &concatenate), 0);
-    set_value(c, "print", 	make_val_func("print", 1, &print), 0);
-    //math stuff
-    value tmp = make_val_inst(c, "math");
-    context* math_c = tmp.val.c;
-    set_value(math_c, "pi", 	make_val_num(M_PI), 0);
-    set_value(math_c, "e", 	make_val_num(M_E), 0);
-    set_value(math_c, "sin", 	make_val_func("sin", 1, &fun_sin), 0);
-    set_value(math_c, "cos", 	make_val_func("cos", 1, &fun_cos), 0);
-    set_value(math_c, "tan", 	make_val_func("tan", 1, &fun_tan), 0);
-    set_value(math_c, "exp", 	make_val_func("exp", 1, &fun_exp), 0);
-    set_value(math_c, "arcsin", make_val_func("arcsin", 1, &fun_asin), 0);
-    set_value(math_c, "arccos", make_val_func("arccos", 1, &fun_acos), 0);
-    set_value(math_c, "arctan", make_val_func("arctan", 1, &fun_atan), 0);
-    set_value(math_c, "log", 	make_val_func("log", 1, &fun_log), 0);
-    set_value(math_c, "sqrt", 	make_val_func("sqrt", 1, &fun_sqrt), 0);
-    set_value(c, "math", tmp, 0);
-}
-
-value lookup(const struct context* c, const char* str) {
-    size_t i;
-    if (find_ind(c, str, SIZE_MAX, &i))
-	return c->table[i].val;
-    //try searching through the parent if that didn't work
-    if (c->parent)
-	return lookup(c->parent, str);
-    //reaching this point in execution means the matching entry wasn't found
-    return make_val_undef();
-}
-int lookup_object(const context* c, const char* str, const char* typename, context** sto) {
-    value vobj = lookup(c, str);
-    if (vobj.type != VAL_INST)
-	return -1;
-    value tmp = lookup(vobj.val.c, "__type__");
-    if (tmp.type != VAL_STR || strcmp(tmp.val.s, typename))
-	return -2;
-    if (sto) *sto = vobj.val.c;
-    return 0;
-}
-int lookup_c_array(const context* c, const char* str, double* sto, size_t n) {
-    if (sto == NULL || n == 0)
-	return 0;
-    value tmp = lookup(c, str);
-    if (!tmp.type)
-	return -1;
-    //bounds check
-    size_t n_write = (tmp.n_els > n) ? n : tmp.n_els;
-    if (tmp.type == VAL_ARRAY) {
-	memcpy(sto, tmp.val.a, sizeof(double)*n_write);
-	return (int)n_write;
-    } else if (tmp.type == VAL_LIST) {
-	for (size_t i = 0; i < n_write; ++i) {
-	    if (tmp.val.l[i].type != VAL_NUM)
-		return -3;
-	    sto[i] = tmp.val.l[i].val.x;
-	}
-	return (int)n_write;
-    }
-    return -2;
-}
-int lookup_c_str(const context* c, const char* str, char* sto, size_t n) {
-    if (sto == NULL || n == 0)
-	return 0;
-    value tmp = lookup(c, str);
-    if (tmp.type != VAL_STR)
-	return -1;
-    //bounds check
-    size_t n_write = (tmp.n_els > n) ? n : tmp.n_els;
-    memcpy(sto, tmp.val.s, sizeof(char)*n_write);
-    return 0;
-}
-int lookup_int(const context* c, const char* str, int* sto) {
-    value tmp = lookup(c, str);
-    if (tmp.type == VAL_NUM)
-	return -1;
-    if (sto) *sto = (int)tmp.val.x;
-    return 0;
-}
-int lookup_size(const context* c, const char* str, size_t* sto) {
-    value tmp = lookup(c, str);
-    if (tmp.type == VAL_NUM)
-	return -1;
-    if (sto) *sto = (size_t)tmp.val.x;
-    return 0;
-}
-int lookup_float(const context* c, const char* str, double* sto) {
-    value tmp = lookup(c, str);
-    if (tmp.type == VAL_NUM)
-	return -1;
-    if (sto) *sto = tmp.val.x;
-    return 0;
-}
-void set_value(struct context* c, const char* p_name, value p_val, int copy) {
-    //generate a fake name if none was provided
-    if (!p_name || p_name[0] == 0) {
-	char tmp[BUF_SIZE];
-	snprintf(tmp, BUF_SIZE, "\e_%lu", c->n_memb);
-	return set_value(c, tmp, p_val, copy);
-    }
-    size_t ti = fnv_1(p_name, SIZE_MAX, c->t_bits);
-    if (!find_ind(c, p_name, SIZE_MAX, &ti)) {
-	//if there isn't already an element with that name we have to expand the table and add a member
-	if (grow_context(c))
-	    find_ind(c, p_name, SIZE_MAX, &ti);
-	c->table[ti].name = strdup(p_name);
-	c->table[ti].val = (copy)? copy_val(p_val) : p_val;
-	++c->n_memb;
-    } else {
-	//otherwise we need to cleanup the old value and add the new
-	cleanup_val( &(c->table[ti].val) );
-	c->table[ti].val = (copy)? copy_val(p_val) : p_val;
-    }
-}
-
-struct for_state {
-    char* var_name;
-    read_state expr_name;
-    lbi for_start;
-    lbi in_start;
-    value it_list;
-    name_val_pair prev;
-    size_t var_ind;
-};
-
-static inline read_state make_read_state(const line_buffer* lb, lbi s, lbi e) {
-    read_state ret;
-    ret.b = lb;
-    ret.pos = s;
-    ret.end = e;
-    return ret;
-}
-
-static inline struct for_state make_for_state(context* c, read_state rs, lbi for_start, value* er) {
-    struct for_state fs;
-    lbi after_for = lb_add(rs.b, for_start, strlen("for"));
-    //now look for a block labeled "in"
-    fs.for_start = for_start;
-    fs.in_start = token_block(rs.b, after_for, rs.end, "in", strlen("in"));
-    if (!lbicmp(fs.in_start, rs.end)) {
-	*er = make_val_error(E_BAD_SYNTAX, "expected keyword in");
-	return fs;
-    }
-    //the variable name is whatever is in between the "for" and the "in"
-    while (is_whitespace(lb_get(rs.b, after_for)))
-	after_for = lb_add(rs.b, after_for, 1);
-    fs.var_name = trim_whitespace(lb_get_line(rs.b, after_for, fs.in_start, NULL), NULL);
-    //now parse the list we iterate over
-    lbi after_in = lb_add(rs.b, fs.in_start, strlen("in"));
-    fs.it_list = parse_value_rs(c, make_read_state(rs.b, after_in, rs.end), NULL);
-    if (fs.it_list.type == VAL_ERR) {
-	*er = make_val_error(E_BAD_SYNTAX, "in expression %s", rs.b->lines[after_in.line]+after_in.off);
-	free(fs.var_name);
-	return fs;
-    }
-    if (fs.it_list.type != VAL_ARRAY && fs.it_list.type != VAL_LIST) {
-	*er =  make_val_error(E_BAD_TYPE, "can't iterate over type %s", valnames[fs.it_list.type]);
-	free(fs.var_name);
-	return fs;
-    }
-    fs.expr_name = make_read_state(rs.b, lb_add(rs.b, rs.pos, 1), fs.for_start);
-    //we need to add a variable with the appropriate name to loop over. We write a value and save the value there before so we can remove it when we're done
-    find_ind(c, fs.var_name, SIZE_MAX, &(fs.var_ind));
-    fs.prev = c->table[fs.var_ind];
-    c->table[fs.var_ind].name = fs.var_name;
-    *er = make_val_undef();
-    return fs;
-}
-
-static inline void finish_for_state(context* c, struct for_state fs) {
-    //we need to reset the table with the loop index before iteration
-    cleanup_name_val_pair(c->table[fs.var_ind]);
-    c->table[fs.var_ind] = fs.prev;
-    //free the memory from the iteration list
-    cleanup_val(&fs.it_list);
 }
 
 /**
@@ -2351,7 +2042,248 @@ static inline value find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi
     destroy_stack(char)(&blk_stk, NULL);
     return make_val_undef();
 }
+//forward declare so that helpers can call
+static inline value parse_value_rs(context* c, read_state rs, lbi* new_end);
+/**
+ * An alternative to lookup which only considers the first n bytes in str
+ */
+static inline value lookupn(const struct context* c, const char* str, size_t n) {
+    //TODO: make this directly access members and dereference arrays
+    size_t i;
+    if (find_ind(c, str, n, &i))
+	return c->table[i].val;
+    //try searching through the parent if that didn't work
+    if (c->parent)
+	return lookupn(c->parent, str, n);
+    //reaching this point in execution means the matching entry wasn't found
+    return make_val_undef();
+}
+/**
+ * similar to set_value(), but read in place from a read state
+ */
+static inline value set_value_rs(struct context* c, read_state rs, value p_val) {
+    lbi dot_loc = strchr_block_rs(rs.b, rs.pos, rs.end, '.');
+    lbi ref_loc = strchr_block_rs(rs.b, rs.pos, rs.end, '[');//]
+    //if there are no dereferences, just access the table directly
+    if (!lbicmp(dot_loc, rs.end) && !lbicmp(ref_loc, rs.end)) {
+	char* str = trim_whitespace(lb_get_line(rs.b, rs.pos, rs.end, NULL), NULL);
+	set_value(c, str, p_val, 0);
+	free(str);
+	return make_val_undef();
+    } else if (lbicmp(dot_loc, ref_loc) < 0) {
+	//access context members
+	value sub_con = lookupn(c, rs.b->lines[rs.pos.line]+rs.pos.off, dot_loc.off-rs.pos.off);
+	if (sub_con.type != VAL_INST)
+	    return make_val_error(E_BAD_TYPE, "cannot access member from non instance type %s", valnames[sub_con.type]);
+	return set_value_rs(sub_con.val.c, make_read_state(rs.b, lb_add(rs.b, dot_loc, 1), rs.end), p_val);
+    } else {
+	//access lists/arrays
+	lbi close_ind = strchr_block_rs(rs.b, lb_add(rs.b, ref_loc, 1), rs.end, /*[*/']');
+	if (lbicmp(close_ind, rs.end) > 0) return make_val_error(E_BAD_SYNTAX, /*[*/"expected ']'");
+	//read the index
+	value index = parse_value_rs(c, make_read_state(rs.b, lb_add(rs.b, ref_loc, 1), close_ind), NULL);
+	if (index.type != VAL_NUM) return make_val_error(E_BAD_TYPE, "cannot index list with type %s", valnames[index.type]);
+	//read the list and convert to an absolute index
+	value lst = lookupn(c, rs.b->lines[rs.pos.line]+rs.pos.off, ref_loc.off-rs.pos.off);
+	size_t i = index_to_abs(&index, lst.n_els);
+	if (index.type == VAL_ERR) return index;
+	//branch based on type
+	if (lst.type == VAL_LIST || lst.type == VAL_MAT) {
+	    //the user might want to access a variable in a list of objects, handle that case
+	    if (lbicmp(dot_loc, rs.end) < 0) {
+		if (lst.val.l[i].type != VAL_INST)
+		    return make_val_error(E_BAD_TYPE, "cannot access member from non instance type %s", valnames[lst.val.l[i].type]);
+		return set_value_rs(lst.val.l[i].val.c, make_read_state(rs.b, lb_add(rs.b, close_ind, 1), rs.end), p_val);
+	    }
+	    lst.val.l[i] = p_val;
+	} else if (lst.type == VAL_ARRAY) {
+	    if (p_val.type != VAL_NUM)
+		return make_val_error(E_BAD_TYPE, "cannot assign type %s to array", valnames[p_val.type]);
+	    lst.val.a[i] = p_val.val.x;
+	} else {
+	    return make_val_error(E_BAD_TYPE, "cannot index type %s", valnames[lst.type]);
+	}
+    }
+}
+#if DEBUG_INFO<1
+static inline
+#endif
+value do_op(context* c, read_state rs, lbi op_loc) {
+    value sto = make_val_undef();
+    //some operators (==, >=, <=) take up more than one character, test for these
+    char op = lb_get(rs.b, op_loc);
+    char next = lb_get(rs.b, lb_add(rs.b, op_loc, 1));
+    int op_width = 1;
+    if (op != '?' && op != '.' && op != '|' && op != '&' && next == '=')
+	op_width = 2;
+    else if ((op == '|' || op == '&') && (next == op))
+	op_width = 2;
+    //set a read state before the operator and after the operator
+    read_state rs_l = rs;
+    read_state rs_r = rs;
+    rs_l.end = op_loc;
+    rs_r.pos = lb_add(rs.b, op_loc, op_width);
+    if (op == '?') {
+	//ternary operators and dereferences are special cases
+	//the colon must be present
+	lbi col_loc = strchr_block_rs(rs.b, op_loc, rs.end, ':');
+	if (lbicmp(col_loc, rs.end) >= 0)
+	    return make_val_error(E_BAD_SYNTAX, "expected ':' in ternary");
 
+	value l = parse_value_rs(c, rs_l, NULL);
+	if (l.type == VAL_ERR)
+	    return l;
+	//0 branch
+	if (l.type == VAL_UNDEF || l.val.x == 0) {
+	    rs_r.pos = lb_add(rs.b, col_loc, 1);
+	    sto = parse_value_rs(c, rs_r, NULL);
+	    return sto;
+	} else {
+	    //1 branch
+	    rs_r.end = col_loc;
+	    sto = parse_value_rs(c, rs_r, NULL);
+	    return sto;
+	}
+    } else if (op == '.') {
+	//dereferencing subvariables
+	lbi s = find_token_before(rs.b, op_loc, rs.pos);
+	if (s.line != op_loc.line)
+	    return make_val_error(E_BAD_SYNTAX, "unexpected line break");
+	value inst_val = lookupn(c, lb_read(rs.b, s), op_loc.off - s.off);
+	if (inst_val.type != VAL_INST)
+	    return make_val_error(E_BAD_TYPE, "tried to find %s in non-instance type %s", lb_read(rs.b, op_loc), valnames[inst_val.type]);
+	return parse_value_rs(inst_val.val.c, rs_r, NULL);
+    } else if (op == '=' && op_width == 1) {
+	//assignments
+	value tmp_val = parse_value_rs(c, rs_r, NULL);
+	if (tmp_val.type == VAL_ERR)
+	    return tmp_val;
+	set_value_rs(c, rs_l, tmp_val);
+	return make_val_undef();
+    } else if (op == '!' && op_width == 1) {
+	value tmp_val = parse_value_rs(c, rs_r, NULL);
+	if (tmp_val.type == VAL_ERR)
+	    return tmp_val;
+	if (tmp_val.type == VAL_UNDEF || (tmp_val.type == VAL_NUM && tmp_val.val.x == 0))
+	    return make_val_num(1);
+	return make_val_num(0);
+    }
+
+    //parse right and left values
+    value l = parse_value_rs(c, rs_l, NULL);
+    if (l.type == VAL_ERR)
+	return l;
+    value r = parse_value_rs(c, rs_r, NULL);
+    if (r.type == VAL_ERR) {
+	cleanup_val(&l);
+	return r;
+    }
+    //WLOG fix all array operations to have the array first
+    if (l.type == VAL_NUM && r.type == VAL_ARRAY)
+	swap_val(&l, &r);
+    sto.type = VAL_NUM;
+    sto.n_els = 1;
+    //handle equality comparisons
+    if (op == '!' || op == '=' || op == '>' || op == '<') {
+	value cmp = value_cmp(l,r);
+	cleanup_val(&l);
+	cleanup_val(&r);
+	if (cmp.type == VAL_ERR)
+	    return cmp;
+	if (op == '=')
+	    return make_val_num(!cmp.val.x);
+	if (op == '!')
+	    return cmp;
+	if (op == '>') {
+	    if (op_width == 2)
+		return make_val_num(cmp.val.x >= 0);
+	    return make_val_num(cmp.val.x > 0);
+	} else {
+	    if (op_width == 2)
+		return make_val_num(cmp.val.x <= 0);
+	    return make_val_num(cmp.val.x < 0);
+	}
+    } else if (op == '|' || op == '&') {
+	if (next != op)
+	    return make_val_error(E_BAD_SYNTAX, "invalid operation \'%c%c\'", op, next);
+	if (l.type == VAL_NUM && r.type == VAL_NUM)
+	    return (op == '|')? make_val_num(l.val.x || r.val.x) : make_val_num(l.val.x && r.val.x);
+	//undefined == false
+	if (l.type == VAL_UNDEF)
+	    return (op == '|')? make_val_num(r.val.x) : make_val_num(0);
+	if (r.type == VAL_UNDEF)
+	    return (op == '|')? make_val_num(1) : make_val_num(0);
+	return make_val_num(1);
+    } else {
+	//arithmetic is all relatively simple
+	switch(op) {
+	case '+': val_add(&l, r);break;
+	case '-': val_sub(&l, r);break;
+	case '*': if (next == '*') { val_exp(&l, r); } else { val_mul(&l, r); }break;
+	case '/': val_div(&l, r);break;
+	}
+	//if this is a relative assignment, do that
+	if (next == '=') {
+	    char* str = trim_whitespace(lb_get_line(rs.b, rs_l.pos, rs_l.end, NULL), NULL);
+	    set_value(c, str, l, 0);
+	    free(str);
+	    l = make_val_undef();
+	}
+	cleanup_val(&r);
+	return l;
+    }
+}
+struct for_state {
+    char* var_name;
+    read_state expr_name;
+    lbi for_start;
+    lbi in_start;
+    value it_list;
+    name_val_pair prev;
+    size_t var_ind;
+};
+static inline struct for_state make_for_state(context* c, read_state rs, lbi for_start, value* er) {
+    struct for_state fs;
+    lbi after_for = lb_add(rs.b, for_start, strlen("for"));
+    //now look for a block labeled "in"
+    fs.for_start = for_start;
+    fs.in_start = token_block(rs.b, after_for, rs.end, "in", strlen("in"));
+    if (!lbicmp(fs.in_start, rs.end)) {
+	*er = make_val_error(E_BAD_SYNTAX, "expected keyword in");
+	return fs;
+    }
+    //the variable name is whatever is in between the "for" and the "in"
+    while (is_whitespace(lb_get(rs.b, after_for)))
+	after_for = lb_add(rs.b, after_for, 1);
+    fs.var_name = trim_whitespace(lb_get_line(rs.b, after_for, fs.in_start, NULL), NULL);
+    //now parse the list we iterate over
+    lbi after_in = lb_add(rs.b, fs.in_start, strlen("in"));
+    fs.it_list = parse_value_rs(c, make_read_state(rs.b, after_in, rs.end), NULL);
+    if (fs.it_list.type == VAL_ERR) {
+	*er = make_val_error(E_BAD_SYNTAX, "in expression %s", rs.b->lines[after_in.line]+after_in.off);
+	free(fs.var_name);
+	return fs;
+    }
+    if (fs.it_list.type != VAL_ARRAY && fs.it_list.type != VAL_LIST) {
+	*er =  make_val_error(E_BAD_TYPE, "can't iterate over type %s", valnames[fs.it_list.type]);
+	free(fs.var_name);
+	return fs;
+    }
+    fs.expr_name = make_read_state(rs.b, lb_add(rs.b, rs.pos, 1), fs.for_start);
+    //we need to add a variable with the appropriate name to loop over. We write a value and save the value there before so we can remove it when we're done
+    find_ind(c, fs.var_name, SIZE_MAX, &(fs.var_ind));
+    fs.prev = c->table[fs.var_ind];
+    c->table[fs.var_ind].name = fs.var_name;
+    *er = make_val_undef();
+    return fs;
+}
+static inline void finish_for_state(context* c, struct for_state fs) {
+    //we need to reset the table with the loop index before iteration
+    cleanup_name_val_pair(c->table[fs.var_ind]);
+    c->table[fs.var_ind] = fs.prev;
+    //free the memory from the iteration list
+    cleanup_val(&fs.it_list);
+}
 //helper for parse_value to hand list literals
 static inline value parse_literal_list(struct context* c, read_state rs, lbi open_ind, lbi close_ind) {
     //if the string is empty then we're creating a new list, otherwise we're accessing an existing list
@@ -2678,22 +2610,136 @@ value parse_value(context* c, char* str) {
     return parse_value_rs(c, rs, NULL);
 }
 
-static inline read_state make_read_state_lb(const line_buffer* pb) {
-    read_state ret;
-    ret.pos = make_lbi(0,0);
-    if (pb->n_lines == 0)
-	ret.end = make_lbi(0,0);
-    else
-	ret.end = make_lbi(0, pb->line_sizes[0]);
-    ret.b = pb;
-    return ret;
+void setup_builtins(struct context* c) {
+    //create builtins
+    set_value(c, "false",	make_val_num(0), 0);
+    set_value(c, "true",	make_val_num(1), 0);//create horrible (if amusing bugs when someone tries to assign to true or false
+    set_value(c, "typeof", 	make_val_func("typeof", 1, &get_type), 0);
+    set_value(c, "len", 	make_val_func("len", 3, &get_len), 0);
+    set_value(c, "range", 	make_val_func("range", 1, &make_range), 0);
+    set_value(c, "linspace", 	make_val_func("linspace", 3, &make_linspace), 0);
+    set_value(c, "flatten", 	make_val_func("flatten", 1, &flatten_list), 0);
+    set_value(c, "array", 	make_val_func("array", 1, &make_array), 0);
+    set_value(c, "vec", 	make_val_func("vec", 1, &make_vec), 0);
+    set_value(c, "cat", 	make_val_func("cat", 1, &concatenate), 0);
+    set_value(c, "print", 	make_val_func("print", 1, &print), 0);
+    //math stuff
+    value tmp = make_val_inst(c, "math");
+    context* math_c = tmp.val.c;
+    set_value(math_c, "pi", 	make_val_num(M_PI), 0);
+    set_value(math_c, "e", 	make_val_num(M_E), 0);
+    set_value(math_c, "sin", 	make_val_func("sin", 1, &fun_sin), 0);
+    set_value(math_c, "cos", 	make_val_func("cos", 1, &fun_cos), 0);
+    set_value(math_c, "tan", 	make_val_func("tan", 1, &fun_tan), 0);
+    set_value(math_c, "exp", 	make_val_func("exp", 1, &fun_exp), 0);
+    set_value(math_c, "arcsin", make_val_func("arcsin", 1, &fun_asin), 0);
+    set_value(math_c, "arccos", make_val_func("arccos", 1, &fun_acos), 0);
+    set_value(math_c, "arctan", make_val_func("arctan", 1, &fun_atan), 0);
+    set_value(math_c, "log", 	make_val_func("log", 1, &fun_log), 0);
+    set_value(math_c, "sqrt", 	make_val_func("sqrt", 1, &fun_sqrt), 0);
+    set_value(c, "math", tmp, 0);
+}
+
+value lookup(const struct context* c, const char* str) {
+    size_t i;
+    if (find_ind(c, str, SIZE_MAX, &i))
+	return c->table[i].val;
+    //try searching through the parent if that didn't work
+    if (c->parent)
+	return lookup(c->parent, str);
+    //reaching this point in execution means the matching entry wasn't found
+    return make_val_undef();
+}
+int lookup_object(const context* c, const char* str, const char* typename, context** sto) {
+    value vobj = lookup(c, str);
+    if (vobj.type != VAL_INST)
+	return -1;
+    value tmp = lookup(vobj.val.c, "__type__");
+    if (tmp.type != VAL_STR || strcmp(tmp.val.s, typename))
+	return -2;
+    if (sto) *sto = vobj.val.c;
+    return 0;
+}
+int lookup_c_array(const context* c, const char* str, double* sto, size_t n) {
+    if (sto == NULL || n == 0)
+	return 0;
+    value tmp = lookup(c, str);
+    if (!tmp.type)
+	return -1;
+    //bounds check
+    size_t n_write = (tmp.n_els > n) ? n : tmp.n_els;
+    if (tmp.type == VAL_ARRAY) {
+	memcpy(sto, tmp.val.a, sizeof(double)*n_write);
+	return (int)n_write;
+    } else if (tmp.type == VAL_LIST) {
+	for (size_t i = 0; i < n_write; ++i) {
+	    if (tmp.val.l[i].type != VAL_NUM)
+		return -3;
+	    sto[i] = tmp.val.l[i].val.x;
+	}
+	return (int)n_write;
+    }
+    return -2;
+}
+int lookup_c_str(const context* c, const char* str, char* sto, size_t n) {
+    if (sto == NULL || n == 0)
+	return 0;
+    value tmp = lookup(c, str);
+    if (tmp.type != VAL_STR)
+	return -1;
+    //bounds check
+    size_t n_write = (tmp.n_els > n) ? n : tmp.n_els;
+    memcpy(sto, tmp.val.s, sizeof(char)*n_write);
+    return 0;
+}
+int lookup_int(const context* c, const char* str, int* sto) {
+    value tmp = lookup(c, str);
+    if (tmp.type == VAL_NUM)
+	return -1;
+    if (sto) *sto = (int)tmp.val.x;
+    return 0;
+}
+int lookup_size(const context* c, const char* str, size_t* sto) {
+    value tmp = lookup(c, str);
+    if (tmp.type == VAL_NUM)
+	return -1;
+    if (sto) *sto = (size_t)tmp.val.x;
+    return 0;
+}
+int lookup_float(const context* c, const char* str, double* sto) {
+    value tmp = lookup(c, str);
+    if (tmp.type == VAL_NUM)
+	return -1;
+    if (sto) *sto = tmp.val.x;
+    return 0;
+}
+void set_value(struct context* c, const char* p_name, value p_val, int copy) {
+    //generate a fake name if none was provided
+    if (!p_name || p_name[0] == 0) {
+	char tmp[BUF_SIZE];
+	snprintf(tmp, BUF_SIZE, "\e_%lu", c->n_memb);
+	return set_value(c, tmp, p_val, copy);
+    }
+    size_t ti = fnv_1(p_name, SIZE_MAX, c->t_bits);
+    if (!find_ind(c, p_name, SIZE_MAX, &ti)) {
+	//if there isn't already an element with that name we have to expand the table and add a member
+	if (grow_context(c))
+	    find_ind(c, p_name, SIZE_MAX, &ti);
+	c->table[ti].name = strdup(p_name);
+	c->table[ti].val = (copy)? copy_val(p_val) : p_val;
+	++c->n_memb;
+    } else {
+	//otherwise we need to cleanup the old value and add the new
+	cleanup_val( &(c->table[ti].val) );
+	c->table[ti].val = (copy)? copy_val(p_val) : p_val;
+    }
 }
 
 value read_from_lines(struct context* c, const line_buffer* b) {
     value er = make_val_undef();
 
     lbi end;
-    read_state rs = make_read_state_lb(b);
+    read_state rs = make_read_state(b, make_lbi(0,0), make_lbi(0,0));
     //iterate over each line in the file
     while (rs.pos.line < b->n_lines) {
 	rs.end = make_lbi(rs.pos.line, b->line_sizes[rs.pos.line]);

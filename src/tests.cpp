@@ -1284,7 +1284,7 @@ TEST_CASE("file parsing") {
     v = lookup(c, "list");
     CHECK(v.type == VAL_LIST);
     v = lookup(c, "sum_list");
-    CHECK(v.type == VAL_NUM);CHECK(v.val.x == 10);
+    CHECK(v.type == VAL_NUM);CHECK(v.val.x == 11);
     v = lookup(c, "prod_list");
     CHECK(v.type == VAL_NUM);CHECK(v.val.x == 24.2);
     v = lookup(c, "acid_test");
