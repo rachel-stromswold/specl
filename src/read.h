@@ -31,30 +31,22 @@
 
 //forward declarations
 struct value;
-struct context;
-struct user_func;
-struct func_call;
+struct spcl_inst;
+struct spcl_uf;
+struct spcl_func_call;
 
 //constants
-typedef struct value (*lib_call)(struct context*, struct func_call);
+typedef struct value (*lib_call)(struct spcl_inst*, struct spcl_func_call);
 typedef unsigned int _uint;
 typedef unsigned char _uint8;
 
-typedef enum { E_SUCCESS, E_NOFILE, E_LACK_TOKENS, E_BAD_TOKEN, E_BAD_SYNTAX, E_BAD_VALUE, E_BAD_TYPE, E_NOMEM, E_NAN, E_UNDEF, E_OUT_OF_RANGE, N_ERRORS } parse_ercode;
+typedef enum { E_SUCCESS, E_NOFILE, E_LACK_TOKENS, E_BAD_SYNTAX, E_BAD_VALUE, E_BAD_TYPE, E_NOMEM, E_NAN, E_UNDEF, E_OUT_OF_RANGE, E_ASSERT, N_ERRORS } parse_ercode;
+const char* const errnames[N_ERRORS] =
+{"SUCCESS", "NO_FILE", "LACK_TOKENS", "BAD_SYNTAX", "BAD_VALUE", "BAD_TYPE", "NOMEM", "NAN", "UNDEF", "OUT_OF_BOUNDS", "ASSERT"};
 typedef enum {VAL_UNDEF, VAL_ERR, VAL_NUM, VAL_STR, VAL_ARRAY, VAL_MAT, VAL_LIST, VAL_FUNC, VAL_INST, VAL_ANY, N_VALTYPES} valtype;
-const char* const errnames[N_ERRORS] = {"SUCCESS", "FILE_NOT_FOUND", "LACK_TOKENS", "BAD_TOKEN", "BAD_SYNTAX", "BAD_VALUE", "BAD_TYPE", "NOMEM", "NAN", "UNDEF", "OUT_OF_BOUNDS"};
 const char* const valnames[N_VALTYPES] = {"undefined", "error", "numeric", "string", "array", "list", "function", "object"};
 //helper classes and things
 typedef enum {BLK_UNDEF, BLK_MISC, BLK_INVERT, BLK_TRANSFORM, BLK_DATA, BLK_ROOT, BLK_COMPOSITE, BLK_FUNC_DEC, BLK_LITERAL, BLK_COMMENT, BLK_SQUARE, BLK_QUOTE, BLK_QUOTE_SING, BLK_PAREN, BLK_CURLY, N_BLK_TYPES} blk_type;
-
-inline void* xrealloc(void* p, size_t nsize) {
-    void* tmp = realloc(p, nsize);
-    if (!tmp) {
-	fprintf(stderr, "Insufficient memory to allocate block of size %lu!\n", nsize);
-	exit(1);
-    }
-    return tmp;
-}
 
 //generic stack class
 #define TYPED_A(NAME,TYPE) NAME##TYPE
@@ -146,20 +138,20 @@ int TYPED(STACK_PEEK,TYPE)(stack(TYPE)* s, size_t ind, TYPE* sto) {			\
  * Wrap a mathematical function that takes a single floating point argument
  * FN: the function to wrap
  */
-#define WRAP_MATH_FN(FN) value TYPED(spcl,FN)(struct context* c, func_call f) {		\
-    value sto = get_sigerr(f, SIGLEN(MATHN_SIG), SIGLEN(MATHN_SIG), MATHN_SIG);		\
+#define WRAP_MATH_FN(FN) value TYPED(spcl,FN)(struct spcl_inst* c, spcl_func_call f) {	\
+    value sto = get_sigerr(f, SIGLEN(NUM1_SIG), SIGLEN(NUM1_SIG), NUM1_SIG);		\
     if (sto.type == 0)									\
-	return make_val_num( FN(f.args[0].val.val.x) );					\
-    cleanup_val(&sto);									\
-    sto = get_sigerr(f, SIGLEN(MATHA_SIG), SIGLEN(MATHA_SIG), MATHA_SIG);		\
+	return spcl_make_num( FN(f.args[0].v.val.x) );					\
+    spcl_cleanup_val(&sto);									\
+    sto = get_sigerr(f, SIGLEN(ARR1_SIG), SIGLEN(ARR1_SIG), ARR1_SIG);			\
     if (sto.type == 0) {								\
 	sto.type = VAL_ARRAY;								\
-	sto.n_els = f.args[0].val.n_els;						\
+	sto.n_els = f.args[0].v.n_els;							\
 	sto.val.a = malloc(sizeof(double)*sto.n_els);					\
 	if (!sto.val.a)									\
-	    return make_val_error(E_NOMEM, "");						\
-	for (size_t i = 0; i < f.args[0].val.n_els; ++i)				\
-	    sto.val.a[i] = FN(f.args[0].val.val.a[i]);					\
+	    return spcl_make_err(E_NOMEM, "");						\
+	for (size_t i = 0; i < f.args[0].v.n_els; ++i)					\
+	    sto.val.a[i] = FN(f.args[0].v.val.a[i]);					\
     }											\
     return sto;										\
 }
@@ -169,7 +161,7 @@ int TYPED(STACK_PEEK,TYPE)(stack(TYPE)* s, size_t ind, TYPE* sto) {			\
  * FUNC: the name of the function
  * SIGNATURE: a constant array of valtypes. Each argument in the function FUNC is tested to make sure it is of the appropriate type. You may include VAL_UNDEF in this array as a wildcard
  */
-#define SIGCHECK(FUNC, SIGNATURE) \
+#define spcl_sigcheck(FUNC, SIGNATURE) \
     value er = get_sigerr(FUNC, SIGLEN(SIGNATURE), SIGLEN(SIGNATURE), SIGNATURE); \
     if (er.type == VAL_ERR) return er
 /**
@@ -178,16 +170,16 @@ int TYPED(STACK_PEEK,TYPE)(stack(TYPE)* s, size_t ind, TYPE* sto) {			\
  * MIN_ARGS: the minimum number of arguments that may be accepted
  * SIGNATURE: the signature of all arguments, including optional ones
  */
-#define SIGCHECK_OPTS(FUNC, MIN_ARGS, SIGNATURE) \
+#define spcl_sigcheck_opts(FUNC, MIN_ARGS, SIGNATURE) \
     value er = get_sigerr(FUNC, MIN_ARGS, SIGLEN(SIGNATURE), SIGNATURE); \
     if (er.type == VAL_ERR) return er
 /**
- * register a function FUNC to the context CON with the name NAME
- * CON: the context to add the function to
+ * register a function FUNC to the spcl_inst CON with the name NAME
+ * CON: the spcl_inst to add the function to
  * FUNC: the C function to add
- * NAME: the name of the function when calling from a specl script
+ * NAME: the name of the function when calling from a spcl script
  */
-#define ADD_SPECL_FN(CON, FUNC, NAME) set_value(CON, NAME, make_val_func(NAME, 1, &FUNC), 0);
+#define spcl_add_fn(CON, FUNC, NAME) spcl_set_value(CON, NAME, spcl_make_fn(NAME, 1, &FUNC), 0);
 
 /** ======================================================== utility functions ======================================================== **/
 
@@ -199,58 +191,40 @@ int TYPED(STACK_PEEK,TYPE)(stack(TYPE)* s, size_t ind, TYPE* sto) {			\
  */
 int namecmp(const char* a, const char* b, size_t n);
 /**
- * This acts similar to getline, but stops at a semicolon, newline (unless preceeded by a \), {, or }.
- * bufptr: a pointer to which the buffer is saved. If bufptr is NULL than a new buffer is allocated through malloc()
- * n: a pointer to a size_t with the number of characters in the buffer pointed to by bufptr. The call will return do nothing and return -1 if n is null but *bufptr is not.
- * fp: file pointer to read from
- * linecount: a pointer to an integer specifying the number of new line characters read.
- * Returns: the number of characters read (including null termination). On reaching the end of the file, 0 is returned.
- */
-size_t read_cgs_line(char** bufptr, size_t* n, FILE* fp, size_t* lineno);
-/**
  * write at most n bytes of the double valued x to str
  */
 int write_numeric(char* str, size_t n, double x);
-/**
- * Convert a string separated by the character sep into a list of strings. For instance, if str == "arg1, arg2" and sep == ',' then the output will be a list of the form ["arg1", "arg2"]. If no sep character is found then the list will have one element which contains the whole string.
- * param str: string to parse into a list
- * param sep: separating character to use.
- * param listlen: location to save the length of the returned list to. Note that this pointer MUST be valid. It is not acceptable to call this function with listlen = NULL. (The returned list is not null terminated so this behavior ensures that callers are appropriately able to identify the length of the returned string.)
- * returns: list of strings separated by commas. This should be freed with a call to DTG_free(). In the event of an error, NULL is returned instead.
- * NOTE: The input string str is modified and the returned value uses memory allocated for str. Thus, the caller must ensure that str has a lifetime at least as long as the used string. Users should not try to call free() on any of the strings in the list, only the list itself.
- */
-char** csv_to_list(char* str, char sep, size_t* listlen);
 
-/** ============================ line_buffer ============================ **/
+/** ============================ spcl_line_buffer ============================ **/
 
 /**
- * store the position within a line_buffer, both line and offset in the line
+ * store the position within a spcl_line_buffer, both line and offset in the line
  */
 typedef struct lbi {
     size_t line;
     size_t off;
 } lbi;
 lbi make_lbi(size_t pl, size_t po);
-lbi lbi_add(lbi lhs, size_t rhs);
-lbi lbi_sub(lbi lhs, size_t rhs);
 int lbicmp(lbi lhs, lbi rhs);
 
-typedef struct line_buffer {
+typedef struct spcl_line_buffer {
     char** lines;
     size_t* line_sizes;//length of each line buffer including null terminator
     size_t n_lines;
-} line_buffer;
-void destroy_line_buffer(line_buffer* lb);
-line_buffer* make_line_buffer(const char* p_fname);
-line_buffer* copy_line_buffer(const line_buffer* o);
+} spcl_line_buffer;
+spcl_line_buffer* make_spcl_line_buffer(const char* p_fname);
+spcl_line_buffer* copy_spcl_line_buffer(const spcl_line_buffer* o);
+void destroy_spcl_line_buffer(spcl_line_buffer* lb);
+#if SPCL_DEBUG_LVL>0
+int it_single(const spcl_line_buffer* lb, char** linesto, char start_delim, char end_delim, lbi* start, lbi* end, int* pdepth, int include_delims, int include_start);
 /**
- * Get the index of the end of the line buffer represented by lb.
+ * Return a string with the line contained between indices b (inclusive) and e (not inclusive).
+ * lb: the spcl_line_buffer to read
+ * b: the beginning to read from
+ * e: read up to this character unless e <= b in which case reading goes to the end of the line
+ * returns: a string with the contents between b and e. This string should be freed with a call to free().
  */
-lbi lb_end(const line_buffer* lb);
-void lb_split(line_buffer* lb, char split_delim);
-#if DEBUG_INFO>0
-int it_single(const line_buffer* lb, char** linesto, char start_delim, char end_delim, lbi* start, lbi* end, int* pdepth, int include_delims, int include_start);
-#endif
+char* lb_get_line(const spcl_line_buffer* lb, lbi b, lbi e, size_t* len);
 /**
  * Find the line buffer starting on line start_line between the first instance of start_delim and the last instance of end_delim respecting nesting (i.e. if lines={"a {", "b {", "}", "} c"} then {"b {", "}"} is returned. Note that the result must be deallocated with a call to free().
  * start_line: the line to start reading from
@@ -260,9 +234,9 @@ int it_single(const line_buffer* lb, char** linesto, char start_delim, char end_
  * line_offset: the character on line start_line to start reading from, this defaults to zero. Note that this only applies to the start_line, and not any subsequent lines in the buffer.
  * include_delims: if true, then the delimeters are included in the enclosed strings. defualts to false
  * include_start: if true, then the part preceeding the first instance of start_delim will be included. This value is always false if include_delims is false. If include_delims is true, then this defaults to true.
- * returns: a line_buffer object which should be destroyed with a call to destroy_line_buffer().
+ * returns: a spcl_line_buffer object which should be destroyed with a call to spcl_destroy_line_buffer().
  */
-line_buffer* lb_get_enclosed(const line_buffer* lb, lbi start, lbi* pend, char start_delim, char end_delim, int include_delims, int include_start);
+spcl_line_buffer* lb_get_enclosed(const spcl_line_buffer* lb, lbi start, lbi* pend, char start_delim, char end_delim, int include_delims, int include_start);
 /**
  * Jump to the end of the next enclosed block started with a start_delim character
  * lb: the linebuffer
@@ -271,43 +245,14 @@ line_buffer* lb_get_enclosed(const line_buffer* lb, lbi start, lbi* pend, char s
  * end_delim: the ending delimiter to look for, see above
  * include_delims: if true, then include the delimeter in the libe buffer
  */
-lbi lb_jmp_enclosed(line_buffer* lb, lbi start, char start_delim, char end_delim, int include_delims);
-/**
- * Return a string with the line contained between indices b (inclusive) and e (not inclusive).
- * lb: the line_buffer to read
- * b: the beginning to read from
- * e: read up to this character unless e <= b in which case reading goes to the end of the line
- * returns: a string with the contents between b and e. This string should be freed with a call to free().
- */
-char* lb_get_line(const line_buffer* lb, lbi b, lbi e, size_t* len);
-/**
- * Return the size of the line with index i.
- */
-size_t lb_get_line_size(const line_buffer* lb, size_t i);
+lbi lb_jmp_enclosed(spcl_line_buffer* lb, lbi start, char start_delim, char end_delim, int include_delims);
 /**
  * Returns a version of the line buffer which is flattened so that everything fits onto one line.
  * sep_char: each newline in the buffer is replaced by a sep_char, unless sep_char=0 in which no characters are inserted
  * len: a pointer which if not null will hold the length of the string including the null terminator
  */
-char* lb_flatten(const line_buffer* lb, char sep_char, size_t* len);
-/**
- * move the line buffer forward by one character
- * p: the index to start at
- */
-lbi lb_add(const line_buffer* lb, lbi p, size_t rhs);
-/**
- * move the line buffer back by one character
- * p: the index to start at
- */
-lbi lb_sub(const line_buffer* lb, lbi p, size_t rhs);
-/**
- * return how many characters into the line buffer l is
- */
-size_t lb_diff(const line_buffer* lb, lbi r, lbi l);
-/**
- * returns the character at position pos
- */
-char lb_get(const line_buffer* lb, lbi pos);
+char* lb_flatten(const spcl_line_buffer* lb, char sep_char, size_t* len);
+#endif
 
 /** ============================ struct value ============================ **/
 
@@ -315,7 +260,6 @@ typedef struct error {
     parse_ercode c;
     char msg[ERR_BSIZE];
 } error;
-struct error* make_error(parse_ercode code, const char* format, ...);
 
 union V {
     error* e;
@@ -323,8 +267,8 @@ union V {
     double x;
     double* a;
     struct value* l;
-    struct user_func* f;
-    struct context* c;
+    struct spcl_uf* f;
+    struct spcl_inst* c;
 };
 
 struct value {
@@ -337,75 +281,73 @@ typedef struct value value;
 /**
  * create an empty value
  */
-value make_val_undef();
+value spcl_make_none();
 /**
  * Create a new error with the specified code and format specifier
  * code: error code type
  * format: a format specifier (just like printf)
  * returns: a pointer to an error object with the specified, which should be deallocated with a call to free()
  */
-value make_val_error(parse_ercode code, const char* format, ...);
+value spcl_make_err(parse_ercode code, const char* format, ...);
 /**
  * create a value from a float
  */
-value make_val_num(double x);
+value spcl_make_num(double x);
 /**
  * create a value from a string
  */
-value make_val_str(const char* s);
+value spcl_make_str(const char* s);
 /**
  * create a value from a c array of doubles
  */
-value make_val_array(double* vs, size_t n);
+value spcl_make_array(double* vs, size_t n);
 /**
  * create a value from a list
  */
-value make_val_list(const value* vs, size_t n_vs);
+value spcl_make_list(const value* vs, size_t n_vs);
 /**
  * Add a new callable function with the signature sig and function pointer corresponding to the executed code. This function must accept a function and a pointer to an error code and return a value.
  */
-value make_val_func(const char* name, size_t n_args, value (*p_exec)(struct context*, struct func_call));
+value spcl_make_fn(const char* name, size_t n_args, value (*p_exec)(struct spcl_inst*, struct spcl_func_call));
 /**
  * make an instance object with the given type
  * p: the parent of the current instance (i.e. its owner
  * s: the name of the type
  */
-value make_val_inst(struct context* parent, const char* s);
+value spcl_make_inst(struct spcl_inst* parent, const char* s);
 /**
- * returns true if a is a string matching b
+ * Compare two values if appropriate, in a manner similar to strcmp.
+ * returns: 0 if a==b, a positive value if a>b, and a negative value if a<b. If no comparison is possible, undefined is returned.
  */
-int value_str_cmp(value a, const char* b);
+value spcl_valcmp(value a, value b);
 /**
  * Convert a value to a string representation.
  * v: the value to convert to a string
  * n: if not NULL, write the number of characters in the string (excluding null terminator)
  * returns: a string which should be deallocated with a call to free()
  */
-char* rep_string(value v, size_t* n);
+char* spcl_stringify(value v, size_t* n);
 /**
  * Perform a cast of the instance to the type t. An error is returned if a cast is impossible.
  * v: the value to cast
  * type: the type to cast v to
  * returns: a value with the specified type or an error value if the cast was impossible
  */
-value cast_to(value v, valtype type);
-/**
- * recursively print out a value and the values it contains
- */
-void print_hierarchy(value v, FILE* f, size_t depth);
+value spcl_cast(value v, valtype type);
 /**
  * check if the value has a type matching the typename str
  */
-void cleanup_val(value* o);
+void spcl_cleanup_val(value* o);
 /**
  * create a new value which is a deep copy of o
  */
-value copy_val(const value o);
+value spcl_copy_val(const value o);
+
+#if SPCL_DEBUG_LVL>0
 /**
- * swap the values stored at a and b
+ * Recursively print out a value and the values it contains. This is useful for debugging.
  */
-void swap_val(value* a, value* b);
-// value operations
+void print_hierarchy(value v, FILE* f, size_t depth);
 /**
  * Add two values together, overwriting the result to l
  * num+num: arithmetic
@@ -415,6 +357,7 @@ void swap_val(value* a, value* b);
  * list+*: append to list
  * str+*: append the string representation of the type * to str
  */
+// value operations
 void val_add(value* l, value r);
 /**
  * Add two values together, overwriting the result to l
@@ -448,198 +391,187 @@ void val_div(value* l, value r);
  * mat/mat: piecewise matrix multiplication
  */
 void val_exp(value* l, value r);
+#endif
 
-/** ============================ func_call ============================ **/
+/** ============================ spcl_func_call ============================ **/
 
 /**
  * A class which stores a labeled value.
  */
 typedef struct name_val_pair {
-    char* name;
-    value val;
+    char* s;	//the name of the pair
+    value v;	//the value
 } name_val_pair;
 struct name_val_pair make_name_val_pair(const char* p_name, value p_val);
 void cleanup_name_val_pair(name_val_pair nv);
 
-//TODO: refactor func_call to accept lbi's instead of names
-typedef struct func_call {
+//TODO: refactor spcl_func_call to accept lbi's instead of names
+typedef struct spcl_func_call {
     char* name;
     name_val_pair args[ARGS_BUF_SIZE];
     size_t n_args;
-} func_call;
+} spcl_func_call;
 
-func_call copy_func(const func_call o);
-void cleanup_func(func_call* o);
-void swap(func_call* a, func_call* b);
-/**
- * Find the named argument with the matching name
- */
-value lookup_named(const func_call f, const char* name);
+spcl_func_call copy_func_call(const spcl_func_call o);
+void spcl_cleanup_func_call(spcl_func_call* o);
 
-/** ============================ context ============================ **/
+/** ============================ spcl_inst ============================ **/
 
-struct context {
+struct spcl_inst {
     //members
     name_val_pair* table;
-    struct context* parent;
+    struct spcl_inst* parent;
     size_t n_memb;
     unsigned char t_bits;//the log base-2 of the size of the table
 };
-typedef struct context context;
+typedef struct spcl_inst spcl_inst;
 
 /**
- * helper struct for struct context objects which stores information read from a file
+ * helper struct for struct spcl_inst objects which stores information read from a file
  */
 typedef struct read_state {
-    const line_buffer* b;
+    const spcl_line_buffer* b;
     lbi start;
     lbi end;
 } read_state;
-
-inline size_t con_size(const context* c) { if (!c) return 0;return 1 << c->t_bits; }
 /**
- * make an empty context. The result must be destroyed using destroy_context().
- * parent: the parent of this context so that we can look up in scope (i.e. a function can access global variables)
+ * Constructor for a new spcl_inst initialized with the contents of fname and optional command line arguments
+ * fname: the name of the file to read
+ * argc: the number arguments
+ * argv: an array of arguments taken from the command-line. Note that callers should not directly pass argc,argv from int main(). Rather, argv should only include valid spclang commands. If you know that spclang commands start at the index i, then you should call spcl_inst_from_file(fname, argc-i, argv+(size_t)i).
+ * error: if not NULL, errors are saved to this pointer.
+ * returns: a newly created spcl_inst with the contents of fname and argv. The caller is responsible for deallocating memory by calling destroy_inst().
  */
-struct context* make_context(context* parent);
+spcl_inst* spcl_inst_from_file(const char* fname, value* error, int argc, char** argv);
 /**
- * Create a deep copy of the context o and return the result. The result must be destroyed using destroy_context().
+ * make an empty spcl_inst. The result must be destroyed using destroy_inst().
+ * parent: the parent of this spcl_inst so that we can look up in scope (i.e. a function can access global variables)
  */
-struct context* copy_context(const context* o);
+struct spcl_inst* make_spcl_inst(spcl_inst* parent);
 /**
- * cleanup the context c
+ * Create a deep copy of the spcl_inst o and return the result. The result must be destroyed using destroy_inst().
  */
-void destroy_context(context* c);
+struct spcl_inst* copy_spcl_inst(const spcl_inst* o);
+/**
+ * cleanup the spcl_inst c
+ */
+void destroy_spcl_inst(spcl_inst* c);
 /**
  * Execute the mathematical operation in the string str at the location op_ind
  */
-#if DEBUG_INFO>0
-value do_op(struct context* c, read_state rs, lbi op_loc);
+#if SPCL_DEBUG_LVL>0
+value do_op(struct spcl_inst* c, read_state rs, lbi op_loc);
 #endif
 /**
- * include builtin functions
- * TODO: make this not dumb
- */
-void setup_builtins(struct context* c);
-/**
- * Search the context for the variable with the matching name.
+ * Search the spcl_inst for the variable with the matching name.
  * name: the name of the variable to set
  * returns: the matching value, no deep copies are performed
  */
-value lookup(const struct context* c, const char* name);
+value spcl_find(const struct spcl_inst* c, const char* name);
 /**
- * Lookup the object named str in c and save the resulting context to sto
- * c: the context to search
+ * Lookup the object named str in c and save the resulting spcl_inst to sto
+ * c: the spcl_inst to search
  * str: the name to lookup
  * type: force the object to match the specified typename
  * sto: overwrite this information to save
  * returns: 0 on success or a negative value if an error occurred (-1 indicates no match, -2 indicates match of the wrong type)
  */
-int lookup_object(const context* c, const char* str, const char* type, context** sto);
+int spcl_find_object(const spcl_inst* c, const char* str, const char* type, spcl_inst** sto);
 /**
  * Lookup the value named str in c and write the first n elements of the resulting list/array to sto
- * c: the context to search
+ * c: the spcl_inst to search
  * str: the name to lookup
  * sto: the array to save to
  * n: the length of sto
  * returns: the number of elements written on success or a negative value if an error occurred (-1 indicates no match, -2 indicates match of the wrong type, -3 indicates an invalid element)
  */
-int lookup_c_array(const context* c, const char* str, double* sto, size_t n);
+int spcl_find_c_array(const spcl_inst* c, const char* str, double* sto, size_t n);
 /**
  * Lookup the value named str in c and write the string sto
- * c: the context to search
+ * c: the spcl_inst to search
  * str: the name to lookup
  * sto: the array to save to
  * n: the length of sto
  * returns: the number of elements written on success or a negative value if an error occurred (-1 indicates no match, -2 indicates match of the wrong type, -3 indicates an invalid element)
  */
-int lookup_c_str(const context* c, const char* str, char* sto, size_t n);
+int spcl_find_c_str(const spcl_inst* c, const char* str, char* sto, size_t n);
 /**
  * lookup the integer value in c at str and save to sto.
  * returns: 0 on success or -1 if the name str couldn't be found
  */
-int lookup_int(const context* c, const char* str, int* sto);
+int spcl_find_int(const spcl_inst* c, const char* str, int* sto);
 /**
  * lookup the unsigned integer value in c at str and save to sto.
  * returns: 0 on success or -1 if the name str couldn't be found
  */
-int lookup_size(const context* c, const char* str, size_t* sto);
+int spcl_find_size(const spcl_inst* c, const char* str, size_t* sto);
 /**
  * lookup the floating point value in c at str and save to sto.
  * returns: 0 on success or -1 if the name str couldn't be found
  */
-int lookup_float(const context* c, const char* str, double* sto);
+int spcl_find_float(const spcl_inst* c, const char* str, double* sto);
 /**
- * Set the value with a name matching p_name to a copy of p_val
+ * Set the value with a name matching p_name to a copy of p_val.
  * name: the name of the variable to set
  * new_val: the value to set the variable to
- * force_push: If set to true, then set_value is guaranteed to increase the stack size by one, even if there is already an element named p_name. This element is guaranteed to receive priority over the existing element, so this may be used to simulate scoped variables.
- * move_assign: If set to true, then the value is directly moved into the context. This can save some time.
+ * copy: This is a boolean which, if true, performs a deep copy of new_val. Otherwise, only a shallow copy (move) is performed.
+ * move_assign: If set to true, then the value is directly moved into the spcl_inst. This can save some time.
  */
-void set_value(struct context* c, const char* name, value new_val, int copy);
+void spcl_set_value(struct spcl_inst* c, const char* name, value new_val, int copy);
 /**
  * Given a string str (which will be modified by this call), return a value corresponding to the expression str
- * c: the context to use when looking for variables and functions
+ * c: the spcl_inst to use when looking for variables and functions
  * str: the string expression to parse
  * returns: a value with the resultant expression
  */
-value parse_value(struct context* c, char* str);
+value spcl_parse_line(struct spcl_inst* c, char* str);
 /**
- * Generate a context from a list of lines. This context will include function declarations, named variables, and subcontexts (instances).
+ * Generate a spcl_inst from a list of lines. This spcl_inst will include function declarations, named variables, and subinstances.
  * lines: the array of lines to read from
  * n_lines: the size of the array
  * returns: an error if one was found or an undefined value on success
  */
-value read_from_lines(struct context* c, const line_buffer* b);
-/**
- * Create a new context initialized with the contents of fname and optional command line arguments
- * fname: the name of the file to read
- * argc: the number arguments
- * argv: an array of arguments taken from the command-line. Note that callers should not directly pass argc,argv from int main(). Rather, argv should only include valid speclang commands. If you know that speclang commands start at the index i, then you should call context_from_file(fname, argc-i, argv+(size_t)i).
- * error: if not NULL, errors are saved to this pointer.
- * returns: a newly created context with the contents of fname and argv. The caller is responsible for deallocating memory by calling destroy_context().
- */
-context* context_from_file(const char* fname, int argc, char** argv, value* error);
+value spcl_read_lines(struct spcl_inst* c, const spcl_line_buffer* b);
 
-/** ============================ user_func ============================ **/
+/** ============================ spcl_uf ============================ **/
 
 /**
  * A class for functions defined by the user along with the implementation code
  */
-typedef struct user_func {
-    func_call call_sig;
-    line_buffer* code_lines;
-    value (*exec)(context*, func_call);
-} user_func;
+typedef struct spcl_uf {
+    spcl_func_call call_sig;
+    spcl_line_buffer* code_lines;
+    value (*exec)(spcl_inst*, spcl_func_call);
+} spcl_uf;
 
 /**
  * constructor
  * sig: this specifies the signature of the function used when calling it
- * bufptr: a buffer to be used for line reading, see read_cgs_line
- * n: the number of characters currently in the buffer, see read_cgs_line
+ * bufptr: a buffer to be used for line reading
+ * n: the number of characters currently in the buffer
  * fp: the file pointer to read from
  */
-user_func* make_user_func_lb(func_call sig, line_buffer* b);
+spcl_uf* make_spcl_uf_lb(spcl_func_call sig, spcl_line_buffer* b);
 /**
  * constructor
  * sig: this specifies the signature of the function used when calling it
- * bufptr: a buffer to be used for line reading, see read_cgs_line
- * n: the number of characters currently in the buffer, see read_cgs_line
+ * bufptr: a buffer to be used for line reading
+ * n: the number of characters currently in the buffer
  * fp: the file pointer to read from
  */
-user_func* make_user_func_ex(value (*p_exec)(context*, func_call));
+spcl_uf* make_spcl_uf_ex(value (*p_exec)(spcl_inst*, spcl_func_call));
 /**
  * create a deep copy of the user_func o and return it. The result must be destroyed using cleanup_user_func.
  */
-user_func* copy_user_func(const user_func* o);
+spcl_uf* copy_spcl_uf(const spcl_uf* o);
 /**
  * Dealocate memory used for uf
  */
-void destroy_user_func(user_func* uf);
+void destroy_spcl_uf(spcl_uf* uf);
 /**
  * evaluate the function
  */
-value uf_eval(user_func* uf, context* c, func_call call);
+value spcl_uf_eval(spcl_uf* uf, spcl_inst* c, spcl_func_call call);
 
 /** ============================ builtin functions ============================ **/
 /**
@@ -650,30 +582,38 @@ value uf_eval(user_func* uf, context* c, func_call call);
  * sig: the first f.n_args arguments in f (assuming min_args<=f.n_args<max_args) must match the specified signature. This array must be large enough to hold max_args
  * returns: an error with an appropriate message or undefined if there was no error
  */
-value get_sigerr(func_call f, size_t min_args, size_t max_args, const valtype* sig);
+value get_sigerr(spcl_func_call f, size_t min_args, size_t max_args, const valtype* sig);
+/**
+ * assert(boolean, optional string message): If the first argument is false, return an error with the specified message. Otherwise, return 1.
+ */
+value spcl_assert(struct spcl_inst* c, spcl_func_call tmp_f);
+/**
+ * Return true if the argument is defined, false otherwise.
+ */
+value spcl_isdef(struct spcl_inst* c, spcl_func_call tmp_f);
 /**
  * Get the type of a value
  */
-value specl_typeof(struct context* c, func_call tmp_f);
+value spcl_typeof(struct spcl_inst* c, spcl_func_call tmp_f);
 /**
  * Make a range following python syntax. If one argument is supplied then a list with tmp_f.args[0] elements is created starting at index 0 and going up to (but not including) tmp_f.args[0]. If two arguments are supplied then the range is from (tmp_f.args[0], tmp_f.args[1]). If three arguments are supplied then the range (tmp_f.args[0], tmp_f.args[1]) is still returned, but now the spacing between successive elements is tmp_f.args[2].
  */
-value specl_range(struct context* c, func_call tmp_f);
+value spcl_range(struct spcl_inst* c, spcl_func_call tmp_f);
 /**
  * linspace(a, b, n) Create a list of n equally spaced real numbers starting at a and ending at b. This function must be called with three aguments unlike np.linspace. Note that the value b is included in the list
  */
-value specl_linspace(struct context* c, func_call tmp_f);
+value spcl_linspace(struct spcl_inst* c, spcl_func_call tmp_f);
 /**
  * Take a list value and flatten it so that it has numpy dimensions (n) where n is the sum of the length of each list in the base list. values are copied in order e.g flatten([0,1],[2,3]) -> [0,1,2,3]
- * func_call: the function with arguments passed
+ * spcl_func_call: the function with arguments passed
  */
-value specl_flatten(struct context* c, func_call tmp_f);
+value spcl_flatten(struct spcl_inst* c, spcl_func_call tmp_f);
 /**
  * Take a list value and flatten it so that it has numpy dimensions (n) where n is the sum of the length of each list in the base list. values are copied in order e.g flatten([0,1],[2,3]) -> [0,1,2,3]
- * func_call: the function with arguments passed
+ * spcl_func_call: the function with arguments passed
  */
-value specl_cat(struct context* c, func_call tmp_f);
-value specl_print(struct context* c, func_call tmp_f);
-value errtype(struct context* c, func_call tmp_f);
+value spcl_cat(struct spcl_inst* c, spcl_func_call tmp_f);
+value spcl_print(struct spcl_inst* c, spcl_func_call tmp_f);
+value errtype(struct spcl_inst* c, spcl_func_call tmp_f);
 
 #endif //READ_H
