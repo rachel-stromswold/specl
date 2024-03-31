@@ -1014,7 +1014,7 @@ spcl_val test_fun_call(spcl_inst* c, spcl_fn_call f) {
     if (a > 5) {
 	ret.type = VAL_INST;
 	ret.val.c = make_spcl_inst(c);
-	spcl_set_spcl_val(ret.val.c, "name", spcl_make_str("hi"), 0);
+	spcl_set_val(ret.val.c, "name", spcl_make_str("hi"), 0);
 	return ret;
     }
     return f.args[0];
@@ -1036,7 +1036,7 @@ TEST_CASE("spcl_inst lookups") {
     char name[GEN_LEN+1];
     memset(name, 0, GEN_LEN+1);
     spcl_inst* c = make_spcl_inst(NULL);
-    spcl_set_spcl_val(c, "tao", spcl_make_str("tao"), 0);
+    spcl_set_val(c, "tao", spcl_make_str("tao"), 0);
     size_t n_combs = 1;
     for (size_t i = 0; i < GEN_LEN; ++i)
 	n_combs *= n_letters;
@@ -1052,7 +1052,7 @@ TEST_CASE("spcl_inst lookups") {
 	    name[k++] = letters[j % n_letters];
 	    j /= n_letters;
 	} while (j && k < GEN_LEN);
-	spcl_set_spcl_val(c, name, spcl_make_num(i), 1);
+	spcl_set_val(c, name, spcl_make_num(i), 1);
 	v = spcl_find(c, name);
 	test_num(v, i);
     }
@@ -1125,7 +1125,7 @@ TEST_CASE("spcl_inst parsing") {
 	spcl_line_buffer* b_1 = make_spcl_line_buffer(TEST_FNAME);
 	spcl_inst* c = make_spcl_inst(NULL);
 	spcl_val tmp_f = spcl_make_fn("test_fun", 1, &test_fun_call);
-	spcl_set_spcl_val(c, "test_fun", tmp_f, 1);
+	spcl_set_val(c, "test_fun", tmp_f, 1);
 	cleanup_spcl_val(&tmp_f);
 	spcl_val er = spcl_read_lines(c, b_1);
 	REQUIRE(er.type != VAL_ERR);
@@ -1161,7 +1161,7 @@ TEST_CASE("spcl_inst parsing") {
 	spcl_val er = spcl_read_lines(c, b_1);
 	CHECK(er.type != VAL_ERR);
 	spcl_val tmp_f = spcl_make_fn("gam", 1, &test_fun_gamma);
-	spcl_set_spcl_val(c, "gam", tmp_f, 1);
+	spcl_set_val(c, "gam", tmp_f, 1);
 	cleanup_spcl_val(&tmp_f);
 	er = spcl_read_lines(c, b_2);
 	CHECK(er.type != VAL_ERR);
@@ -1179,15 +1179,15 @@ spcl_val spcl_gen_gaussian_source(spcl_inst* c, spcl_fn_call f) {
     if (f.args[f.n_args-1].val.type != VAL_INST)
 	return spcl_make_err(E_BAD_TYPE, "");*/
     spcl_val ret = spcl_make_inst(c, "Gaussian_source");
-    spcl_set_spcl_val(ret.val.c, "component", f.args[0], 1);
-    spcl_set_spcl_val(ret.val.c, "wavelength", f.args[1], 0);
-    spcl_set_spcl_val(ret.val.c, "amplitude", f.args[2], 0);
-    spcl_set_spcl_val(ret.val.c, "width", f.args[3], 0);
-    spcl_set_spcl_val(ret.val.c, "phase", f.args[4], 0);
+    spcl_set_val(ret.val.c, "component", f.args[0], 1);
+    spcl_set_val(ret.val.c, "wavelength", f.args[1], 0);
+    spcl_set_val(ret.val.c, "amplitude", f.args[2], 0);
+    spcl_set_val(ret.val.c, "width", f.args[3], 0);
+    spcl_set_val(ret.val.c, "phase", f.args[4], 0);
     //read additional parameters
-    spcl_set_spcl_val(ret.val.c, "cutoff", (f.n_args>6)? f.args[5]: spcl_make_num(5), 0);
-    spcl_set_spcl_val(ret.val.c, "start_time", (f.n_args>7)? f.args[6]: spcl_make_num(5), 0);
-    spcl_set_spcl_val(ret.val.c, "region", f.args[f.n_args-1], 1);
+    spcl_set_val(ret.val.c, "cutoff", (f.n_args>6)? f.args[5]: spcl_make_num(5), 0);
+    spcl_set_val(ret.val.c, "start_time", (f.n_args>7)? f.args[6]: spcl_make_num(5), 0);
+    spcl_set_val(ret.val.c, "region", f.args[f.n_args-1], 1);
     return ret;
 }
 static const valtype BOX_SIG[] = {VAL_ARRAY, VAL_ARRAY};
@@ -1197,14 +1197,14 @@ spcl_val spcl_gen_box(spcl_inst* c, spcl_fn_call f) {
     if (ret.type)
 	return ret;*/
     spcl_val ret = spcl_make_inst(c, "Box");
-    spcl_set_spcl_val(ret.val.c, "pt_1", f.args[0], 1);
-    spcl_set_spcl_val(ret.val.c, "pt_2", f.args[1], 1);
+    spcl_set_val(ret.val.c, "pt_1", f.args[0], 1);
+    spcl_set_val(ret.val.c, "pt_2", f.args[1], 1);
     return ret;
 }
 void setup_geometry_inst(spcl_inst* con) {
     //we have to set up the spcl_inst with all of our functions
-    spcl_set_spcl_val(con, "Gaussian_source", spcl_make_fn("Gaussian_source", 6, &spcl_gen_gaussian_source), 0);
-    spcl_set_spcl_val(con, "Box", spcl_make_fn("Box", 2, &spcl_gen_box), 0);
+    spcl_set_val(con, "Gaussian_source", spcl_make_fn("Gaussian_source", 6, &spcl_gen_gaussian_source), 0);
+    spcl_set_val(con, "Box", spcl_make_fn("Box", 2, &spcl_gen_box), 0);
 }
 
 TEST_CASE("file parsing") {

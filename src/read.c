@@ -1162,7 +1162,7 @@ spcl_val spcl_make_inst(spcl_inst* parent, const char* s) {
     v.val.c = make_spcl_inst(parent);
     if (s && s[0] != 0) {
 	spcl_val tmp = spcl_make_str(s);
-	spcl_set_spcl_val(v.val.c, "__type__", tmp, 0);
+	spcl_set_val(v.val.c, "__type__", tmp, 0);
     }
     return v;
 }
@@ -1842,8 +1842,8 @@ static inline int grow_inst(struct spcl_inst* c) {
  */
 static inline void setup_builtins(struct spcl_inst* c) {
     //create builtins
-    spcl_set_spcl_val(c, "false",	spcl_make_num(0), 0);
-    spcl_set_spcl_val(c, "true",	spcl_make_num(1), 0);//create horrible (if amusing bugs when someone tries to assign to true or false
+    spcl_set_val(c, "false",	spcl_make_num(0), 0);
+    spcl_set_val(c, "true",	spcl_make_num(1), 0);//create horrible (if amusing bugs when someone tries to assign to true or false
     spcl_add_fn(c, spcl_assert,		"assert");
     spcl_add_fn(c, spcl_typeof,		"typeof");
     spcl_add_fn(c, spcl_len,		"len");
@@ -1857,8 +1857,8 @@ static inline void setup_builtins(struct spcl_inst* c) {
     //math stuff
     spcl_val tmp = spcl_make_inst(c, "math");
     spcl_inst* math_c = tmp.val.c;
-    spcl_set_spcl_val(math_c, "pi", 	spcl_make_num(M_PI), 0);
-    spcl_set_spcl_val(math_c, "e", 	spcl_make_num(M_E), 0);
+    spcl_set_val(math_c, "pi", 	spcl_make_num(M_PI), 0);
+    spcl_set_val(math_c, "e", 	spcl_make_num(M_E), 0);
     spcl_add_fn(math_c, spcl_sin,	"sin");
     spcl_add_fn(math_c, spcl_cos,	"cos");
     spcl_add_fn(math_c, spcl_tan,	"tan");
@@ -1868,7 +1868,7 @@ static inline void setup_builtins(struct spcl_inst* c) {
     spcl_add_fn(math_c, spcl_exp,	"exp");
     spcl_add_fn(math_c, spcl_log,	"log");
     spcl_add_fn(math_c, spcl_sqrt,	"sqrt");
-    spcl_set_spcl_val(c, "math", tmp, 0);
+    spcl_set_val(c, "math", tmp, 0);
 }
 
 struct spcl_inst* make_spcl_inst(spcl_inst* parent) {
@@ -2077,7 +2077,7 @@ static inline spcl_val set_spcl_val_rs(struct spcl_inst* c, read_state rs, spcl_
     //if there are no dereferences, just access the table directly
     if (!lbicmp(dot_loc, rs.end) && !lbicmp(ref_loc, rs.end)) {
 	char* str = trim_whitespace(lb_get_line(rs.b, rs.start, rs.end, NULL), NULL);
-	spcl_set_spcl_val(c, str, p_val, 0);
+	spcl_set_val(c, str, p_val, 0);
 	free(str);
 	return spcl_make_none();
     } else if (lbicmp(dot_loc, ref_loc) < 0) {
@@ -2227,7 +2227,7 @@ spcl_val do_op(spcl_inst* c, read_state rs, lbi op_loc) {
 	//if this is a relative assignment, do that
 	if (next == '=') {
 	    char* str = trim_whitespace(lb_get_line(rs.b, rs_l.start, rs_l.end, NULL), NULL);
-	    spcl_set_spcl_val(c, str, l, 0);
+	    spcl_set_val(c, str, l, 0);
 	    free(str);
 	    l = spcl_make_none();
 	}
@@ -2509,7 +2509,7 @@ static inline spcl_val parse_literal_table(struct spcl_inst* c, read_state rs, l
     }
     //transfer each spcl_val
     for (size_t i = 0; i < ret.n_els; ++i) {
-	spcl_set_spcl_val(ret.val.c, nvps[i].s, nvps[i].v, 0);
+	spcl_set_val(ret.val.c, nvps[i].s, nvps[i].v, 0);
 	free(nvps[i].s);
     }
     ret.type = VAL_INST;
@@ -2664,12 +2664,12 @@ int spcl_find_float(const spcl_inst* c, const char* str, double* sto) {
     if (sto) *sto = tmp.val.x;
     return 0;
 }
-void spcl_set_spcl_val(struct spcl_inst* c, const char* p_name, spcl_val p_val, int copy) {
+void spcl_set_val(struct spcl_inst* c, const char* p_name, spcl_val p_val, int copy) {
     //generate a fake name if none was provided
     if (!p_name || p_name[0] == 0) {
 	char tmp[BUF_SIZE];
 	snprintf(tmp, BUF_SIZE, "\e_%lu", c->n_memb);
-	return spcl_set_spcl_val(c, tmp, p_val, copy);
+	return spcl_set_val(c, tmp, p_val, copy);
     }
     size_t ti = fnv_1(p_name, SIZE_MAX, c->t_bits);
     if (!find_ind(c, p_name, SIZE_MAX, &ti)) {
@@ -2772,7 +2772,7 @@ spcl_val spcl_uf_eval(spcl_uf* uf, spcl_inst* c, spcl_fn_call call) {
 	//setup a new scope with function arguments defined
 	spcl_inst* func_scope = make_spcl_inst(c);
 	for (size_t i = 0; i < uf->call_sig.n_args; ++i) {
-	    spcl_set_spcl_val(func_scope, uf->call_sig.args[i].s, call.args[i].v, 0);
+	    spcl_set_val(func_scope, uf->call_sig.args[i].s, call.args[i].v, 0);
 	}
 	destroy_spcl_inst(func_scope);*/
     }

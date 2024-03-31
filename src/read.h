@@ -180,7 +180,7 @@ int TYPED(STACK_PEEK,TYPE)(stack(TYPE)* s, size_t ind, TYPE* sto) {			\
  * FN_CALL: the C function to add
  * NAME: the name of the function when calling from a spcl script
  */
-#define spcl_add_fn(INST, FN_CALL, NAME) spcl_set_spcl_val(INST, NAME, spcl_make_fn(NAME, 1, &FN_CALL), 0);
+#define spcl_add_fn(INST, FN_CALL, NAME) spcl_set_val(INST, NAME, spcl_make_fn(NAME, 1, &FN_CALL), 0);
 
 /** ======================================================== utility functions ======================================================== **/
 
@@ -519,7 +519,7 @@ int spcl_find_float(const spcl_inst* c, const char* str, double* sto);
  * copy: This is a boolean which, if true, performs a deep copy of new_val. Otherwise, only a shallow copy (move) is performed.
  * move_assign: If set to true, then the spcl_val is directly moved into the spcl_inst. This can save some time.
  */
-void spcl_set_spcl_val(struct spcl_inst* c, const char* name, spcl_val new_val, int copy);
+void spcl_set_val(struct spcl_inst* c, const char* name, spcl_val new_val, int copy);
 /**
  * Given a string str (which will be modified by this call), return a spcl_val corresponding to the expression str
  * c: the spcl_inst to use when looking for variables and functions
