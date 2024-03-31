@@ -779,10 +779,10 @@ TEST_CASE("builtin functions") {
     destroy_spcl_inst(sc);
 }
 
-char* fetch_lb_line(const spcl_line_buffer* lb, size_t line, size_t off) {
+char* fetch_fs_line(const spcl_fstream* fs, size_t line, size_t off) {
     lbi s = make_lbi(line,off);
-    lbi e = make_lbi(line, lb->line_sizes[line]);
-    return lb_get_line(lb, s, e, NULL);
+    lbi e = make_lbi(line, fs->line_sizes[line]);
+    return fs_get_line(fs, s, e, NULL);
 }
 
 void write_test_file(const char** lines, size_t n_lines, const char* fname) {
@@ -792,12 +792,12 @@ void write_test_file(const char** lines, size_t n_lines, const char* fname) {
     fclose(f);
 }
 
-TEST_CASE("test spcl_line_buffer it_single") {
+TEST_CASE("test spcl_fstream it_single") {
     const char* lines[] = { "def test_fun(a)", "{", "if a > 5 {", "return 1", "}", "return 0", "}" };
     size_t n_lines = sizeof(lines)/sizeof(char*);
     write_test_file(lines, n_lines, TEST_FNAME);
     //check the lines (curly brace on new line)
-    spcl_line_buffer* lb = make_spcl_line_buffer(TEST_FNAME);
+    spcl_fstream* fs = make_spcl_fstream(TEST_FNAME);
     //test it_single
     int depth = 0;
     char* it_single_str = NULL;
@@ -805,7 +805,7 @@ TEST_CASE("test spcl_line_buffer it_single") {
     for (size_t i = 0; i < n_lines; ++i) {
 	lbi start = make_lbi(i, 0);
 	lbi end = make_lbi(i, 0);
-	int it_start = it_single(lb, &it_single_str, '{', '}', &start, &end, &depth, true, false);
+	int it_start = it_single(fs, &it_single_str, '{', '}', &start, &end, &depth, true, false);
 	if (i == 1)
 	    CHECK(it_start == 0);
 	else
@@ -828,7 +828,7 @@ TEST_CASE("test spcl_line_buffer it_single") {
     for (size_t i = 0; i < n_lines; ++i) {
 	lbi start = make_lbi(i, 0);
 	lbi end = make_lbi(i, 0);
-	int it_start = it_single(lb, &it_single_str, '{', '}', &start, &end, &depth, false, false);
+	int it_start = it_single(fs, &it_single_str, '{', '}', &start, &end, &depth, false, false);
 	if (i == 1)
 	    CHECK(it_start == 0);
 	else
@@ -855,10 +855,10 @@ TEST_CASE("test spcl_line_buffer it_single") {
 	else
 	    CHECK(depth >= 1);
     }
-    destroy_spcl_line_buffer(lb);
+    destroy_spcl_fstream(fs);
 }
 
-TEST_CASE("spcl_line_buffer lb_get_enclosed") {
+TEST_CASE("spcl_fstream fs_get_enclosed") {
     const char* fun_contents[] = {"", "if a > 5 {", "return 1", "}", "return 0", ""};
     const char* if_contents[] = {"", "return 1", ""};
     size_t fun_n = sizeof(fun_contents)/sizeof(char*);
@@ -872,47 +872,47 @@ TEST_CASE("spcl_line_buffer lb_get_enclosed") {
 	size_t n_lines = sizeof(lines)/sizeof(char*);
 	write_test_file(lines, n_lines, TEST_FNAME);
 	//check the lines (curly brace on new line)
-	spcl_line_buffer* lb = make_spcl_line_buffer(TEST_FNAME);
+	spcl_fstream* fs = make_spcl_fstream(TEST_FNAME);
 	for (size_t i = 0; i < n_lines; ++i) {
-	    strval = fetch_lb_line(lb, i, 0);
+	    strval = fetch_fs_line(fs, i, 0);
 	    CHECK(strcmp(lines[i], strval) == 0);
 	    free(strval);
 	}
 	//test wrapper functions that use it_single
 	lbi bstart;
-	spcl_line_buffer* b_fun_con = lb_get_enclosed(lb, bstart, &end_ind, '{', '}', 0, 0);
+	spcl_fstream* b_fun_con = fs_get_enclosed(fs, bstart, &end_ind, '{', '}', 0, 0);
 	CHECK(b_fun_con->n_lines == fun_n);
 	CHECK(end_ind.line == 6);
 	for (size_t i = 0; i < fun_n; ++i) {
-	    strval = fetch_lb_line(b_fun_con, i,0);CHECK(strcmp(fun_contents[i], strval) == 0);free(strval);
+	    strval = fetch_fs_line(b_fun_con, i,0);CHECK(strcmp(fun_contents[i], strval) == 0);free(strval);
 	}
-	spcl_line_buffer* b_if_con = lb_get_enclosed(b_fun_con, bstart, &end_ind, '{', '}', 0, 0);
+	spcl_fstream* b_if_con = fs_get_enclosed(b_fun_con, bstart, &end_ind, '{', '}', 0, 0);
 	CHECK(b_if_con->n_lines == if_n);
 	CHECK(end_ind.line == 3);
 	for (size_t i = 0; i < if_n; ++i) {
-	    strval = fetch_lb_line(b_if_con, i,0);CHECK(strcmp(if_contents[i], strval) == 0);free(strval);
+	    strval = fetch_fs_line(b_if_con, i,0);CHECK(strcmp(if_contents[i], strval) == 0);free(strval);
 	}
 	//check jumping
 	lbi blk_start = make_lbi(0,0);
-	lbi blk_end_ind = lb_jmp_enclosed(lb, blk_start, '{', '}', 0);
+	lbi blk_end_ind = fs_jmp_enclosed(fs, blk_start, '{', '}', 0);
 	CHECK(blk_end_ind.line == 6);
 	CHECK(blk_end_ind.off == 0);
-	blk_end_ind = lb_jmp_enclosed(lb, blk_start, '{', '}', true);
+	blk_end_ind = fs_jmp_enclosed(fs, blk_start, '{', '}', true);
 	CHECK(blk_end_ind.line == 6);
 	CHECK(blk_end_ind.off == 1);
 	//try flattening
 	size_t len;
-	char* fun_flat = lb_flatten(b_fun_con, 0, &len);
+	char* fun_flat = fs_flatten(b_fun_con, 0, &len);
 	CHECK(strcmp(fun_flat, "if a > 5 {return 1}return 0") == 0);
 	CHECK(len == 28);
 	free(fun_flat);
-	fun_flat = lb_flatten(b_fun_con, '|', &len);
+	fun_flat = fs_flatten(b_fun_con, '|', &len);
 	CHECK(strcmp(fun_flat, "if a > 5 {|return 1|}|return 0||") == 0);
 	CHECK(len == 33);
 	free(fun_flat);
-	destroy_spcl_line_buffer(lb);
-	destroy_spcl_line_buffer(b_fun_con);
-	destroy_spcl_line_buffer(b_if_con);
+	destroy_spcl_fstream(fs);
+	destroy_spcl_fstream(b_fun_con);
+	destroy_spcl_fstream(b_if_con);
     }
 
     SUBCASE("open brace on the same line") {
@@ -920,45 +920,45 @@ TEST_CASE("spcl_line_buffer lb_get_enclosed") {
 	size_t n_lines = sizeof(lines)/sizeof(char*);
 	write_test_file(lines, n_lines, TEST_FNAME);
 	//check the lines (curly brace on same line)
-	spcl_line_buffer* lb = make_spcl_line_buffer(TEST_FNAME);
+	spcl_fstream* fs = make_spcl_fstream(TEST_FNAME);
 	for (size_t i = 0; i < n_lines; ++i) {
-	    strval = fetch_lb_line(lb, i,0);CHECK(strcmp(lines[i], strval) == 0);free(strval);
+	    strval = fetch_fs_line(fs, i,0);CHECK(strcmp(lines[i], strval) == 0);free(strval);
 	}
 	//test wrapper functions that use it_single
 	lbi bstart;
-	spcl_line_buffer* b_fun_con = lb_get_enclosed(lb, bstart, &end_ind, '{', '}', 0, 0);
+	spcl_fstream* b_fun_con = fs_get_enclosed(fs, bstart, &end_ind, '{', '}', 0, 0);
 	CHECK(b_fun_con->n_lines == fun_n);
 	CHECK(end_ind.line == 5);
 	for (size_t i = 0; i < fun_n; ++i) {
-	    strval = fetch_lb_line(b_fun_con, i,0);CHECK(strcmp(fun_contents[i], strval) == 0);free(strval);
+	    strval = fetch_fs_line(b_fun_con, i,0);CHECK(strcmp(fun_contents[i], strval) == 0);free(strval);
 	}
-	spcl_line_buffer* b_if_con_2 = lb_get_enclosed(b_fun_con, bstart, &end_ind, '{', '}', 0, 0);
+	spcl_fstream* b_if_con_2 = fs_get_enclosed(b_fun_con, bstart, &end_ind, '{', '}', 0, 0);
 	CHECK(b_if_con_2->n_lines == if_n);
 	CHECK(end_ind.line == 3);
 	for (size_t i = 0; i < if_n; ++i) {
-	    strval = fetch_lb_line(b_if_con_2, i,0);CHECK(strcmp(if_contents[i], strval) == 0);free(strval);
+	    strval = fetch_fs_line(b_if_con_2, i,0);CHECK(strcmp(if_contents[i], strval) == 0);free(strval);
 	}
-	destroy_spcl_line_buffer(b_if_con_2);
+	destroy_spcl_fstream(b_if_con_2);
 	//check jumping
 	lbi blk_start = make_lbi(0,0);
-	lbi blk_end_ind = lb_jmp_enclosed(b_fun_con, blk_start, '{', '}', 0);
+	lbi blk_end_ind = fs_jmp_enclosed(b_fun_con, blk_start, '{', '}', 0);
 	CHECK(blk_end_ind.line == 3);
 	CHECK(blk_end_ind.off == 0);
-	blk_end_ind = lb_jmp_enclosed(b_fun_con, blk_start, '{', '}', true);
+	blk_end_ind = fs_jmp_enclosed(b_fun_con, blk_start, '{', '}', true);
 	CHECK(blk_end_ind.line == 3);
 	CHECK(blk_end_ind.off == 1);
 	//try flattening
 	size_t len;
-	char* fun_flat = lb_flatten(b_fun_con, 0, &len);
+	char* fun_flat = fs_flatten(b_fun_con, 0, &len);
 	CHECK(strcmp(fun_flat, "if a > 5 {return 1}return 0") == 0);
 	CHECK(len == 28);
 	free(fun_flat);
-	fun_flat = lb_flatten(b_fun_con, '|', &len);
+	fun_flat = fs_flatten(b_fun_con, '|', &len);
 	CHECK(strcmp(fun_flat, "if a > 5 {|return 1|}|return 0||") == 0);
 	CHECK(len == 33);
 	free(fun_flat);
-	destroy_spcl_line_buffer(lb);
-	destroy_spcl_line_buffer(b_fun_con);
+	destroy_spcl_fstream(fs);
+	destroy_spcl_fstream(b_fun_con);
     }
 
     SUBCASE("everything on one line") {
@@ -966,41 +966,41 @@ TEST_CASE("spcl_line_buffer lb_get_enclosed") {
 	size_t n_lines = sizeof(lines)/sizeof(char*);
 	write_test_file(lines, n_lines, TEST_FNAME);
 	//check the lines (curly brace on new line)
-	spcl_line_buffer* lb = make_spcl_line_buffer(TEST_FNAME);
+	spcl_fstream* fs = make_spcl_fstream(TEST_FNAME);
 	for (size_t i = 0; i < n_lines; ++i) {
-	    strval = fetch_lb_line(lb, i,0);CHECK(strcmp(lines[i], strval) == 0);free(strval);
+	    strval = fetch_fs_line(fs, i,0);CHECK(strcmp(lines[i], strval) == 0);free(strval);
 	}
 	//test wrapper functions that use it_single
 	lbi bstart;
-	spcl_line_buffer* b_fun_con = lb_get_enclosed(lb, bstart, &end_ind, '{', '}', 0, 0);
+	spcl_fstream* b_fun_con = fs_get_enclosed(fs, bstart, &end_ind, '{', '}', 0, 0);
 	CHECK(b_fun_con->n_lines == 1);
 	CHECK(end_ind.line == 0);
-	strval = fetch_lb_line(b_fun_con, 0,0);CHECK(strcmp("if a > 5 {return 1}return 0", strval) == 0);free(strval);
-	spcl_line_buffer* b_if_con = lb_get_enclosed(b_fun_con, bstart, &end_ind, '{', '}', 0, 0);
+	strval = fetch_fs_line(b_fun_con, 0,0);CHECK(strcmp("if a > 5 {return 1}return 0", strval) == 0);free(strval);
+	spcl_fstream* b_if_con = fs_get_enclosed(b_fun_con, bstart, &end_ind, '{', '}', 0, 0);
 	CHECK(b_if_con->n_lines == 1);
 	CHECK(end_ind.line == 0);
-	strval = fetch_lb_line(b_if_con, 0,0);CHECK(strcmp("return 1", strval) == 0);free(strval);
+	strval = fetch_fs_line(b_if_con, 0,0);CHECK(strcmp("return 1", strval) == 0);free(strval);
 	//check jumping
 	lbi blk_start;
-	lbi blk_end_ind = lb_jmp_enclosed(b_fun_con, blk_start, '{', '}', 0);
+	lbi blk_end_ind = fs_jmp_enclosed(b_fun_con, blk_start, '{', '}', 0);
 	CHECK(blk_end_ind.line == 0);
 	CHECK(blk_end_ind.off == 18);
-	blk_end_ind = lb_jmp_enclosed(b_fun_con, blk_start, '{', '}', true);
+	blk_end_ind = fs_jmp_enclosed(b_fun_con, blk_start, '{', '}', true);
 	CHECK(blk_end_ind.line == 0);
 	CHECK(blk_end_ind.off == 19);
 	//try flattening
 	size_t len;
-	char* fun_flat = lb_flatten(b_fun_con, 0, &len);
+	char* fun_flat = fs_flatten(b_fun_con, 0, &len);
 	CHECK(strcmp(fun_flat, "if a > 5 {return 1}return 0") == 0);
 	CHECK(len == 28);
 	free(fun_flat);
-	fun_flat = lb_flatten(b_fun_con, '|', &len);
+	fun_flat = fs_flatten(b_fun_con, '|', &len);
 	CHECK(strcmp(fun_flat, "if a > 5 {return 1}return 0|") == 0);
 	CHECK(len == 29);
 	free(fun_flat);
-	destroy_spcl_line_buffer(lb);
-	destroy_spcl_line_buffer(b_fun_con);
-	destroy_spcl_line_buffer(b_if_con);
+	destroy_spcl_fstream(fs);
+	destroy_spcl_fstream(b_fun_con);
+	destroy_spcl_fstream(b_if_con);
     }
 }
 
@@ -1090,10 +1090,12 @@ TEST_CASE("spcl_inst parsing") {
     SUBCASE ("with nesting") {
 	const char* lines[] = { "a = {name = \"apple\",", "spcl_vals = [20, 11]}", "b = a.spcl_vals[0]", "c = a.spcl_vals[1] + a.spcl_vals[0]+1" }; 
 	size_t n_lines = sizeof(lines)/sizeof(char*);
-	write_test_file(lines, n_lines, TEST_FNAME);
-	spcl_val er;
-	spcl_inst* c = spcl_inst_from_file(TEST_FNAME, &er, 0, NULL);
-	CHECK(er.type != VAL_ERR);
+	spcl_fstream* fs = make_spcl_fstream(NULL);
+	for (size_t i = 0; i < n_lines; ++i)
+	    spcl_fstream_append(fs, lines[i]);
+	spcl_inst* c = make_spcl_inst(NULL);
+	spcl_val er = spcl_read_lines(c, fs);
+	CHECK(er.type == VAL_UNDEF);
 	//lookup the named spcl_vals
 	spcl_val val_a = spcl_find(c, "a");
 	CHECK(val_a.type == VAL_INST);
@@ -1119,10 +1121,10 @@ TEST_CASE("spcl_inst parsing") {
 	const char* fun_name = "test_fun";
 	char* tmp_name = strdup(fun_name);
 
-	const char* lines[] = { "a = test_fun(1)", "b=test_fun(10)" };
+	const char* lines[] = { "a = test_fun(1);b=test_fun(10)" };
 	size_t n_lines = sizeof(lines)/sizeof(char*);
 	write_test_file(lines, n_lines, TEST_FNAME);
-	spcl_line_buffer* b_1 = make_spcl_line_buffer(TEST_FNAME);
+	spcl_fstream* b_1 = make_spcl_fstream(TEST_FNAME);
 	spcl_inst* c = make_spcl_inst(NULL);
 	spcl_val tmp_f = spcl_make_fn("test_fun", 1, &test_fun_call);
 	spcl_set_val(c, "test_fun", tmp_f, 1);
@@ -1143,7 +1145,7 @@ TEST_CASE("spcl_inst parsing") {
 	CHECK(strcmp(val_b_name.val.s, "hi") == 0);
 	free(tmp_name);
 	destroy_spcl_inst(c);
-	destroy_spcl_line_buffer(b_1);
+	destroy_spcl_fstream(b_1);
     }
     SUBCASE ("stress test") {
 	//first we add a bunch of arbitrary variables to make searching harder for the parser
@@ -1152,11 +1154,11 @@ TEST_CASE("spcl_inst parsing") {
 	    "y = 2.0", "xs = linspace(0, y, 10000)", "arr1 = [math.sin(6*x/y) for x in xs]" };
 	size_t n_lines1 = sizeof(lines1)/sizeof(char*);
 	write_test_file(lines1, n_lines1, TEST_FNAME);
-	spcl_line_buffer* b_1 = make_spcl_line_buffer(TEST_FNAME);
+	spcl_fstream* b_1 = make_spcl_fstream(TEST_FNAME);
 	const char* lines2[] = { "arr2 = [gam(x/y) for x in xs]" };
 	size_t n_lines2 = sizeof(lines2)/sizeof(char*);
 	write_test_file(lines2, n_lines2, TEST_FNAME);
-	spcl_line_buffer* b_2 = make_spcl_line_buffer(TEST_FNAME);
+	spcl_fstream* b_2 = make_spcl_fstream(TEST_FNAME);
 	spcl_inst* c = make_spcl_inst(NULL);
 	spcl_val er = spcl_read_lines(c, b_1);
 	CHECK(er.type != VAL_ERR);
@@ -1166,8 +1168,8 @@ TEST_CASE("spcl_inst parsing") {
 	er = spcl_read_lines(c, b_2);
 	CHECK(er.type != VAL_ERR);
 	destroy_spcl_inst(c);
-	destroy_spcl_line_buffer(b_1);
-	destroy_spcl_line_buffer(b_2);
+	destroy_spcl_fstream(b_1);
+	destroy_spcl_fstream(b_2);
     }
 }
 static const valtype SRC_SIG[] = {VAL_STR, VAL_NUM, VAL_NUM, VAL_NUM, VAL_NUM, VAL_NUM, VAL_NUM, VAL_INST};
@@ -1210,10 +1212,10 @@ void setup_geometry_inst(spcl_inst* con) {
 TEST_CASE("file parsing") {
     printf( "name = %s %s\n", TEST_GEOM_NAME, TEST_BENCH_NAME );
     char buf[BUF_SIZE];
-    spcl_line_buffer* lb = make_spcl_line_buffer(TEST_GEOM_NAME);
+    spcl_fstream* fs = make_spcl_fstream(TEST_GEOM_NAME);
     spcl_inst* c = make_spcl_inst(NULL);
     setup_geometry_inst(c);
-    spcl_val er = spcl_read_lines(c, lb);
+    spcl_val er = spcl_read_lines(c, fs);
     CHECK(er.type != VAL_ERR);
     spcl_val v = spcl_find(c, "offset");
     CHECK(v.type == VAL_NUM);CHECK(v.val.x == 0.2);
@@ -1251,7 +1253,7 @@ TEST_CASE("file parsing") {
     CHECK(spcl_true(spcl_parse_line(c, buf)));
     strncpy(buf, "gs.region.pt_2 == vec(.4, 0.4, .2)", BUF_SIZE);
     CHECK(spcl_true(spcl_parse_line(c, buf)));
-    destroy_spcl_line_buffer(lb);
+    destroy_spcl_fstream(fs);
     destroy_spcl_inst(c);
 }
 

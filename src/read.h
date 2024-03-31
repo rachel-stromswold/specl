@@ -196,10 +196,10 @@ int namecmp(const char* a, const char* b, size_t n);
  */
 int write_numeric(char* str, size_t n, double x);
 
-/** ============================ spcl_line_buffer ============================ **/
+/** ============================ spcl_fstream ============================ **/
 
 /**
- * store the position within a spcl_line_buffer, both line and offset in the line
+ * store the position within a spcl_fstream, both line and offset in the line
  */
 typedef struct lbi {
     size_t line;
@@ -208,24 +208,40 @@ typedef struct lbi {
 lbi make_lbi(size_t pl, size_t po);
 int lbicmp(lbi lhs, lbi rhs);
 
-typedef struct spcl_line_buffer {
+typedef struct spcl_fstream {
     char** lines;
     size_t* line_sizes;//length of each line buffer including null terminator
     size_t n_lines;
-} spcl_line_buffer;
-spcl_line_buffer* make_spcl_line_buffer(const char* p_fname);
-spcl_line_buffer* copy_spcl_line_buffer(const spcl_line_buffer* o);
-void destroy_spcl_line_buffer(spcl_line_buffer* lb);
+} spcl_fstream;
+/**
+ * Return a new spcl_fstream
+ */
+spcl_fstream* make_spcl_fstream(const char* p_fname);
+/**
+ * Return a copy to the fstream pointed to by o
+ */
+spcl_fstream* copy_spcl_fstream(const spcl_fstream* o);
+/**
+ * Free memory associated with the spcl_fstream fs.
+ * fs: the fstream to destroy. This should be created with a call to make_spcl_fstream or copy_spcl_fstream as a call to free(fs) is made.
+ */
+void destroy_spcl_fstream(spcl_fstream* fs);
+/**
+ * Append the line str to the end of the fstream fs
+ * fs: the fstream to modify
+ * str: the line to append
+ */
+void spcl_fstream_append(spcl_fstream* fs, const char* str);
 #if SPCL_DEBUG_LVL>0
-int it_single(const spcl_line_buffer* lb, char** linesto, char start_delim, char end_delim, lbi* start, lbi* end, int* pdepth, int include_delims, int include_start);
+int it_single(const spcl_fstream* fs, char** linesto, char start_delim, char end_delim, lbi* start, lbi* end, int* pdepth, int include_delims, int include_start);
 /**
  * Return a string with the line contained between indices b (inclusive) and e (not inclusive).
- * lb: the spcl_line_buffer to read
+ * fs: the spcl_fstream to read
  * b: the beginning to read from
  * e: read up to this character unless e <= b in which case reading goes to the end of the line
  * returns: a string with the contents between b and e. This string should be freed with a call to free().
  */
-char* lb_get_line(const spcl_line_buffer* lb, lbi b, lbi e, size_t* len);
+char* fs_get_line(const spcl_fstream* fs, lbi b, lbi e, size_t* len);
 /**
  * Find the line buffer starting on line start_line between the first instance of start_delim and the last instance of end_delim respecting nesting (i.e. if lines={"a {", "b {", "}", "} c"} then {"b {", "}"} is returned. Note that the result must be deallocated with a call to free().
  * start_line: the line to start reading from
@@ -235,24 +251,24 @@ char* lb_get_line(const spcl_line_buffer* lb, lbi b, lbi e, size_t* len);
  * line_offset: the character on line start_line to start reading from, this defaults to zero. Note that this only applies to the start_line, and not any subsequent lines in the buffer.
  * include_delims: if true, then the delimeters are included in the enclosed strings. defualts to false
  * include_start: if true, then the part preceeding the first instance of start_delim will be included. This spcl_val is always false if include_delims is false. If include_delims is true, then this defaults to true.
- * returns: a spcl_line_buffer object which should be destroyed with a call to spcl_destroy_line_buffer().
+ * returns: a spcl_fstream object which should be destroyed with a call to spcl_destroy_fstream().
  */
-spcl_line_buffer* lb_get_enclosed(const spcl_line_buffer* lb, lbi start, lbi* pend, char start_delim, char end_delim, int include_delims, int include_start);
+spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, lbi start, lbi* pend, char start_delim, char end_delim, int include_delims, int include_start);
 /**
  * Jump to the end of the next enclosed block started with a start_delim character
- * lb: the linebuffer
+ * fs: the linebuffer
  * start: the location from which we start seeking
  * start_delim: the starting delimeter to look for (e.g. '(','{'... corresponding to ')','}'... respectively)
  * end_delim: the ending delimiter to look for, see above
  * include_delims: if true, then include the delimeter in the libe buffer
  */
-lbi lb_jmp_enclosed(spcl_line_buffer* lb, lbi start, char start_delim, char end_delim, int include_delims);
+lbi fs_jmp_enclosed(spcl_fstream* fs, lbi start, char start_delim, char end_delim, int include_delims);
 /**
  * Returns a version of the line buffer which is flattened so that everything fits onto one line.
  * sep_char: each newline in the buffer is replaced by a sep_char, unless sep_char=0 in which no characters are inserted
  * len: a pointer which if not null will hold the length of the string including the null terminator
  */
-char* lb_flatten(const spcl_line_buffer* lb, char sep_char, size_t* len);
+char* fs_flatten(const spcl_fstream* fs, char sep_char, size_t* len);
 #endif
 
 /** ============================ struct spcl_val ============================ **/
@@ -432,7 +448,7 @@ typedef struct spcl_inst spcl_inst;
  * helper struct for struct spcl_inst objects which stores information read from a file
  */
 typedef struct read_state {
-    const spcl_line_buffer* b;
+    const spcl_fstream* b;
     lbi start;
     lbi end;
 } read_state;
@@ -533,7 +549,7 @@ spcl_val spcl_parse_line(struct spcl_inst* c, char* str);
  * n_lines: the size of the array
  * returns: an error if one was found or an undefined spcl_val on success
  */
-spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_line_buffer* b);
+spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b);
 
 /** ============================ spcl_uf ============================ **/
 
@@ -542,7 +558,7 @@ spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_line_buffer* b);
  */
 typedef struct spcl_uf {
     spcl_fn_call call_sig;
-    spcl_line_buffer* code_lines;
+    spcl_fstream* code_lines;
     spcl_val (*exec)(spcl_inst*, spcl_fn_call);
 } spcl_uf;
 
@@ -553,7 +569,7 @@ typedef struct spcl_uf {
  * n: the number of characters currently in the buffer
  * fp: the file pointer to read from
  */
-spcl_uf* make_spcl_uf_lb(spcl_fn_call sig, spcl_line_buffer* b);
+spcl_uf* make_spcl_uf_lb(spcl_fn_call sig, spcl_fstream* b);
 /**
  * constructor
  * sig: this specifies the signature of the function used when calling it
