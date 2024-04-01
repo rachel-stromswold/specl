@@ -976,7 +976,7 @@ spcl_val spcl_cat(struct spcl_inst* c, spcl_fn_call f) {
  */
 spcl_val spcl_print(struct spcl_inst* inst, spcl_fn_call f) {
     spcl_val ret = spcl_make_none();
-    char buf[BUF_SIZE];
+    char buf[SPCL_STR_BSIZE];
     //TODO: allow writing to other files, by allowing a file pointer to be the first argument
     if (f.n_args < 1)
 	return spcl_make_none();
@@ -998,27 +998,16 @@ spcl_val spcl_print(struct spcl_inst* inst, spcl_fn_call f) {
 	} else if (*c == '%') {
 	    if (j >= f.n_args)
 		return spcl_make_err(E_LACK_TOKENS, "too few tokens for format string");
-	    spcl_stringify(f.args[j++], buf, BUF_SIZE);
+	    spcl_stringify(f.args[j++], buf, SPCL_STR_BSIZE);
 	    fputs(buf, stdout);
 	} else {
 	    fputc(*c, stdout);
 	}
     }
     for (; j < f.n_args; ++j) {
-	spcl_stringify(f.args[j], buf, BUF_SIZE);
+	spcl_stringify(f.args[j], buf, SPCL_STR_BSIZE);
 	fputs(buf, stdout);
     }
-    /*for (size_t i = 0; i < f.n_args; ++i) {
-	spcl_stringify(f.args[i].v, buf, BUF_SIZE);
-	if (f.args[i].v.type == VAL_NUM) {
-	    printf("%f", f.args[i].v.val.x);
-	} else if (f.args[i].v.type == VAL_STR) {
-	    printf("%s", f.args[i].v.val.s);
-	} else {
-	    printf("<object at %p>", f.args[i].v.val.l);
-	}
-    }
-    printf("\n");*/
     return ret;
 }
 /**
@@ -1348,8 +1337,8 @@ spcl_val spcl_cast(spcl_val v, valtype t) {
 	}
     } else if (t == VAL_STR) {
 	//anything -> string
-	ret.val.s = xmalloc(sizeof(char)*BUF_SIZE);
-	char* end = spcl_stringify(v, ret.val.s, BUF_SIZE);
+	ret.val.s = xmalloc(sizeof(char)*SPCL_STR_BSIZE);
+	char* end = spcl_stringify(v, ret.val.s, SPCL_STR_BSIZE);
 	ret.n_els = (size_t)(end-ret.val.s);
     }
     //if we reach this point in execution then there was an error
@@ -2429,8 +2418,8 @@ static inline spcl_val parse_literal_func(struct spcl_inst* c, read_state rs, lb
     lbi* arg_inds = csv_to_inds(rs.b, open_ind, close_ind, &f.n_args);
     if (f.n_args == 0)
 	return spcl_make_err(E_BAD_SYNTAX, "overlapping parentheses (something really weird happened)");
-    if (f.n_args >= ARGS_BUF_SIZE)
-	return spcl_make_err(E_OUT_OF_RANGE, "speclang only supports at most %lu arguments in functions", ARGS_BUF_SIZE-1);
+    if (f.n_args >= SPCL_ARGS_BSIZE)
+	return spcl_make_err(E_OUT_OF_RANGE, "speclang only supports at most %lu arguments in functions", SPCL_ARGS_BSIZE-1);
     //set up a function and figure out the function name 
     lbi s = find_token_before(rs.b, open_ind, rs.start);
     if (s.line != open_ind.line)
@@ -2443,7 +2432,7 @@ static inline spcl_val parse_literal_func(struct spcl_inst* c, read_state rs, lb
 	/*sto.type = VAL_FUNC;
 	sto.n_els = f.n_args;
 	//we setup arg_inds such that consecutive indices give strings to read
-	for (size_t i = 0; i < f.n_args && i+1 < ARGS_BUF_SIZE; ++i)
+	for (size_t i = 0; i < f.n_args && i+1 < SPCL_ARGS_BSIZE; ++i)
 	    f.args[i].s = fs_get_line(rs.b, fs_add(rs.b, arg_inds[i], 1), arg_inds[i+1], NULL);
 	sto.val.f = make_spcl_uf_lb(f, fs_get_enclosed(rs.b, close_ind, new_end, '{', '}', 0, 0));*/
     } else {
@@ -2468,7 +2457,19 @@ static inline spcl_val parse_literal_func(struct spcl_inst* c, read_state rs, lb
 	//read the arguments
 	size_t j = 0;
 	for (size_t i = 0; i < f.n_args; ++i) {
-	    f.args[j] = spcl_parse_line_rs(c, make_read_state(rs.b, fs_add(rs.b, arg_inds[i], 1), arg_inds[i+1]), NULL);
+	    lbi s = fs_add(rs.b, arg_inds[i], 1);
+	    while (is_whitespace(fs_get(rs.b, s)) && lbicmp(s, arg_inds[i+1]) < 0)
+		s = fs_add(rs.b, s, 1);
+	    //if we reached the end then that either indicates no arguments or invalid syntax
+	    if (lbicmp(s, arg_inds[i+1]) == 0) {
+		//that means that this is a () expression
+		if (i == 0)
+		    f.n_args = 0;
+		else
+		    return spcl_make_err(E_BAD_SYNTAX, "no expression between arguments");
+		break;
+	    }
+	    f.args[j] = spcl_parse_line_rs(c, make_read_state(rs.b, s, arg_inds[i+1]), NULL);
 	    //check for errors
 	    if (f.args[j].type == VAL_ERR) {
 		spcl_val er = copy_spcl_val(f.args[j]);
@@ -2663,8 +2664,8 @@ int spcl_find_float(const spcl_inst* c, const char* str, double* sto) {
 void spcl_set_val(struct spcl_inst* c, const char* p_name, spcl_val p_val, int copy) {
     //generate a fake name if none was provided
     if (!p_name || p_name[0] == 0) {
-	char tmp[BUF_SIZE];
-	snprintf(tmp, BUF_SIZE, "\e_%lu", c->n_memb);
+	char tmp[SPCL_STR_BSIZE];
+	snprintf(tmp, SPCL_STR_BSIZE, "\e_%lu", c->n_memb);
 	return spcl_set_val(c, tmp, p_val, copy);
     }
     size_t ti = fnv_1(p_name, SIZE_MAX, c->t_bits);

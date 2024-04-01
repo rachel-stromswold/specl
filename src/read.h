@@ -10,25 +10,25 @@
 #include <string.h>
 
 //hints for dynamic buffer sizes
-#define ERR_BSIZE	1024
-#define BUF_SIZE 	1024
-#define ARGS_BUF_SIZE 	16
-#define MAX_NUM_SIZE	10
-#define LINE_SIZE 	128
-#define STACK_SIZE	8
-#define ALLOC_LST_N	16
-#define MAX_PRINT_ELS	8
+#define ERR_BSIZE		1024
+#define SPCL_STR_BSIZE 		1024
+#define SPCL_ARGS_BSIZE 	16
+#define MAX_NUM_SIZE		10
+#define LINE_SIZE 		128
+#define STACK_SIZE		8
+#define ALLOC_LST_N		16
+#define MAX_PRINT_ELS		8
 
 //easily find signature lengths
-#define SIGLEN(s)	(sizeof(s)/sizeof(valtype))
+#define SIGLEN(s)		(sizeof(s)/sizeof(valtype))
 
 //hash params
-#define DEF_TAB_BITS	4
-#define FNV_PRIME	16777619
-#define FNV_OFFSET	2166136261
+#define DEF_TAB_BITS		4
+#define FNV_PRIME		16777619
+#define FNV_OFFSET		2166136261
 //we grow the hash table when the load factor (number of occupied slots/total slots) is greater than GROW_LOAD_NUM/GROW_LOAD_DEN
-#define GROW_LOAD_NUM	4
-#define GROW_LOAD_DEN	5
+#define GROW_LOAD_NUM		4
+#define GROW_LOAD_DEN		5
 
 //forward declarations
 struct spcl_val;
@@ -426,7 +426,7 @@ void cleanup_name_val_pair(name_val_pair nv);
 //TODO: refactor spcl_fn_call to accept lbi's instead of names
 typedef struct spcl_fn_call {
     char* name;
-    spcl_val args[ARGS_BUF_SIZE];
+    spcl_val args[SPCL_ARGS_BSIZE];
     size_t n_args;
 } spcl_fn_call;
 
