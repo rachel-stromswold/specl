@@ -2,7 +2,7 @@
 #include <doctest.h>
 
 extern "C" {
-#include "read.h"
+#include "speclang.h"
 #define TEST_FNAME	"/tmp/speclang_test.spcl"
 }
 #define STRIFY(S) #S
@@ -17,6 +17,43 @@ void test_num(spcl_val v, double x) {
     CHECK(v.type == VAL_NUM);
     CHECK(v.val.x == x);
     CHECK(v.n_els == 1);
+}
+
+/**
+ * save the mean and variance of values in the flattened array x[n] to mean and var. Takes only points where the index i satisfies off <= i % (dim+space) < off+dim these samples are treated as a vector. For instance mean_var(x, 6, 2, 1, 0, &mean, &var) will take the samples i=(0,1),(3,4). mean_var(x, 6, 2, 0, 0, &mean, &var) will take the samples i=(0,1),(2,3),(4,5)
+ * x: the list of points
+ * dim: the dimension of each sample
+ * space: the separation between each sample
+ * mean: a pointer where the mean is stored
+ * var: a pointer where the variance is stored
+ */
+void mean_var(const double* x, size_t n, double* mean, double* var, size_t dim=1, size_t space=0, size_t off=0) {
+    if (n == 0) {
+	*mean = 0;
+	*var = 0;
+	return;
+    }
+    *mean = 0;
+    size_t width = dim+space;
+    for (size_t i = 0; i < n; ++i) {
+	double tmp = 0;
+	for (size_t j = 0; j < dim; ++j)
+	    tmp += x[i*width+j+off]*x[i*width+j+off];
+	*mean += sqrt(tmp);
+    }
+    *mean = *mean/(double)n;
+    *var = 0;
+    //avoid division by zero
+    if (n == 1)
+	return;
+    for (size_t i = 0; i < n; ++i) {
+	double tmp = 0;
+	for (size_t j = 0; j < dim; ++j)
+	    tmp += x[i*width+j+off]*x[i*width+j+off];
+	tmp = sqrt(tmp);
+	*var += (tmp - *mean)*(tmp - *mean);
+    }
+    *var = *var/(double)(n-1);
 }
 
 TEST_CASE("namecmp") {
@@ -779,11 +816,13 @@ TEST_CASE("builtin functions") {
     destroy_spcl_inst(sc);
 }
 
+#if SPCL_DEBUG_LVL>0
 char* fetch_fs_line(const spcl_fstream* fs, size_t line, size_t off) {
     lbi s = make_lbi(line,off);
     lbi e = make_lbi(line, fs->line_sizes[line]);
     return fs_get_line(fs, s, e, NULL);
 }
+#endif
 
 void write_test_file(const char** lines, size_t n_lines, const char* fname) {
     FILE* f = fopen(fname, "w");
@@ -792,6 +831,8 @@ void write_test_file(const char** lines, size_t n_lines, const char* fname) {
     fclose(f);
 }
 
+//this function has a bunch of stuff that's only marked visible in debug builds, so we just ommit it for release
+#if SPCL_DEBUG_LVL>0
 TEST_CASE("test spcl_fstream it_single") {
     const char* lines[] = { "def test_fun(a)", "{", "if a > 5 {", "return 1", "}", "return 0", "}" };
     size_t n_lines = sizeof(lines)/sizeof(char*);
@@ -857,7 +898,6 @@ TEST_CASE("test spcl_fstream it_single") {
     }
     destroy_spcl_fstream(fs);
 }
-
 TEST_CASE("spcl_fstream fs_get_enclosed") {
     const char* fun_contents[] = {"", "if a > 5 {", "return 1", "}", "return 0", ""};
     const char* if_contents[] = {"", "return 1", ""};
@@ -883,14 +923,19 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	spcl_fstream* b_fun_con = fs_get_enclosed(fs, bstart, &end_ind, '{', '}', 0, 0);
 	CHECK(b_fun_con->n_lines == fun_n);
 	CHECK(end_ind.line == 6);
+
 	for (size_t i = 0; i < fun_n; ++i) {
-	    strval = fetch_fs_line(b_fun_con, i,0);CHECK(strcmp(fun_contents[i], strval) == 0);free(strval);
+	    strval = fetch_fs_line(b_fun_con, i,0);
+	    CHECK(strcmp(fun_contents[i], strval) == 0);
+	    free(strval);
 	}
 	spcl_fstream* b_if_con = fs_get_enclosed(b_fun_con, bstart, &end_ind, '{', '}', 0, 0);
 	CHECK(b_if_con->n_lines == if_n);
 	CHECK(end_ind.line == 3);
 	for (size_t i = 0; i < if_n; ++i) {
-	    strval = fetch_fs_line(b_if_con, i,0);CHECK(strcmp(if_contents[i], strval) == 0);free(strval);
+	    strval = fetch_fs_line(b_if_con, i,0);
+	    CHECK(strcmp(if_contents[i], strval) == 0);
+	    free(strval);
 	}
 	//check jumping
 	lbi blk_start = make_lbi(0,0);
@@ -1003,6 +1048,7 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	destroy_spcl_fstream(b_if_con);
     }
 }
+#endif
 
 spcl_val test_fun_call(spcl_inst* c, spcl_fn_call f) {
     spcl_val ret;
@@ -1021,6 +1067,7 @@ spcl_val test_fun_call(spcl_inst* c, spcl_fn_call f) {
 }
 
 spcl_val test_fun_gamma(spcl_inst* c, spcl_fn_call f) {
+    (void)c;
     if (f.n_args < 1)
 	return spcl_make_err(E_LACK_TOKENS, "expected 1 argument");
     if (f.args[0].type != VAL_NUM)
@@ -1211,7 +1258,6 @@ void setup_geometry_inst(spcl_inst* con) {
 }
 
 TEST_CASE("file parsing") {
-    printf( "name = %s %s\n", TEST_GEOM_NAME, TEST_BENCH_NAME );
     char buf[SPCL_STR_BSIZE];
     spcl_fstream* fs = make_spcl_fstream(TEST_GEOM_NAME);
     spcl_inst* c = make_spcl_inst(NULL);
@@ -1259,12 +1305,32 @@ TEST_CASE("file parsing") {
 }
 
 TEST_CASE("benchmarks") {
+    const size_t N_RUNS = 100;
+    double times[N_RUNS];
+    double mean, var;
     spcl_val er;
-    auto start = std::chrono::steady_clock::now();
-    spcl_inst* c = spcl_inst_from_file(TEST_BENCH_NAME, &er, 0, NULL);
-    auto end = std::chrono::steady_clock::now();
-    double time = std::chrono::duration <double, std::milli> (end-start).count();
-    printf("benchmark.spcl evaluated in %f ms\n", time);
-    cleanup_spcl_val(&er);
-    destroy_spcl_inst(c);
+    //run assertions
+    for (size_t i = 0; i < N_RUNS; ++i) {
+	auto start = std::chrono::steady_clock::now();
+	spcl_inst* c = spcl_inst_from_file(TEST_ASSERT_NAME, &er, 0, NULL);
+	auto end = std::chrono::steady_clock::now();
+	times[i] = std::chrono::duration <double, std::milli> (end-start).count();
+	if (i == 0)
+	    CHECK(er.type == VAL_UNDEF);
+	cleanup_spcl_val(&er);
+	destroy_spcl_inst(c);
+    }
+    mean_var(times, N_RUNS, &mean, &var);
+    printf("assertions.spcl evaluated in %f\xc2\xb1%f ms\n", mean, sqrt(var));
+    //run benchmarks
+    for (size_t i = 0; i < N_RUNS; ++i) {
+	auto start = std::chrono::steady_clock::now();
+	spcl_inst* c = spcl_inst_from_file(TEST_BENCH_NAME, &er, 0, NULL);
+	auto end = std::chrono::steady_clock::now();
+	times[i] = std::chrono::duration <double, std::milli> (end-start).count();
+	cleanup_spcl_val(&er);
+	destroy_spcl_inst(c);
+    }
+    mean_var(times, N_RUNS, &mean, &var);
+    printf("benchmark.spcl evaluated in %f\xc2\xb1%f ms\n", mean, sqrt(var));
 }

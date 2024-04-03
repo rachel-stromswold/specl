@@ -1,4 +1,8 @@
-#include "read.h"
+#include "speclang.h"
+
+const char* const errnames[N_ERRORS] =
+{"SUCCESS", "NO_FILE", "LACK_TOKENS", "BAD_SYNTAX", "BAD_VALUE", "BAD_TYPE", "NOMEM", "NAN", "UNDEF", "OUT_OF_BOUNDS", "ASSERT"};
+const char* const valnames[N_VALTYPES] = {"undefined", "error", "numeric", "string", "array", "list", "function", "object"};
 
 STACK_DEF(blk_type)
 STACK_DEF(size_t)
@@ -428,10 +432,7 @@ spcl_fstream* make_spcl_fstream(const char* p_fname) {
 		    this_buf[line_len] = 0;
 		    go_again = 0;
 		    break;
-		} else if ((char)res == '/' && line_len > 0 && this_buf[line_len-1] == '/') {
-		    this_buf[line_len-1] = 0;
-		    break;
-		}
+		}	
                 this_buf[line_len] = (char)res;
                 res = fgetc(fp);
             }
@@ -748,19 +749,19 @@ spcl_val get_sigerr(spcl_fn_call f, size_t min_args, size_t max_args, const valt
     if (!sig || max_args < min_args)
 	return spcl_make_none();
     if (f.n_args < min_args)
-	return spcl_make_err(E_LACK_TOKENS, "%s() expected %lu arguments, got %lu", f.name, min_args, f.n_args);
+	return spcl_make_err(E_LACK_TOKENS, "%s expected %lu arguments, got %lu", f.name, min_args, f.n_args);
     if (f.n_args > max_args)
-	return spcl_make_err(E_LACK_TOKENS, "%s() with too many arguments, %lu", f.name, f.n_args);
+	return spcl_make_err(E_LACK_TOKENS, "%s with too many arguments, %lu", f.name, f.n_args);
     for (size_t i = 0; i < f.n_args; ++i) {
 	//treat undefined as allowing for arbitrary type
 	if (sig[i] && f.args[i].type != sig[i]) {
 	    //if the type is an error, let it pass through
 	    if (f.args[i].type == VAL_ERR)
 		return f.args[i];
-	    return spcl_make_err(E_BAD_TYPE, "%s() expected args[%lu].type=%s, got %s", f.name, i, valnames[sig[i]], valnames[f.args[i].type]);
+	    return spcl_make_err(E_BAD_TYPE, "%s expected args[%lu].type=%s, got %s", f.name, i, valnames[sig[i]], valnames[f.args[i].type]);
 	}
 	if (sig[i] > VAL_NUM && f.args[i].val.s == NULL)
-	    return spcl_make_err(E_BAD_TYPE, "%s() found empty %s at args[%lu]", f.name, valnames[sig[i]], i);
+	    return spcl_make_err(E_BAD_TYPE, "%s found empty %s at args[%lu]", f.name, valnames[sig[i]], i);
     }
     return spcl_make_none();
 }
@@ -980,28 +981,28 @@ spcl_val spcl_print(struct spcl_inst* inst, spcl_fn_call f) {
     //TODO: allow writing to other files, by allowing a file pointer to be the first argument
     if (f.n_args < 1)
 	return spcl_make_none();
-    if (f.args[0].type != VAL_STR)
-	return spcl_make_err(E_BAD_TYPE, "invalid format string for print");
     size_t j = 1;
-    for (char* c = f.args[0].val.s; *c; ++c) {
-	if (*c == '\\') {
-	    switch (c[1]) {
-		case 't': fputc('\t', stdout);break;
-		case 'n': fputc('\n', stdout);break;
-		case '\\': fputc('\\', stdout);break;
-		case '%': fputc('%', stdout);break;
-		case '\"': fputc('\"', stdout);break;
-		case '\'': fputc('\'', stdout);break;
-		default: return spcl_make_err(E_BAD_SYNTAX, "unrecognized escape sequence %c%c", c[0], c[1]);
+    if (f.args[0].type == VAL_STR) {
+	for (char* c = f.args[0].val.s; *c; ++c) {
+	    if (*c == '\\') {
+		switch (c[1]) {
+		    case 't': fputc('\t', stdout);break;
+		    case 'n': fputc('\n', stdout);break;
+		    case '\\': fputc('\\', stdout);break;
+		    case '%': fputc('%', stdout);break;
+		    case '\"': fputc('\"', stdout);break;
+		    case '\'': fputc('\'', stdout);break;
+		    default: return spcl_make_err(E_BAD_SYNTAX, "unrecognized escape sequence %c%c", c[0], c[1]);
+		}
+		++c;
+	    } else if (*c == '%') {
+		if (j >= f.n_args)
+		    return spcl_make_err(E_LACK_TOKENS, "too few tokens for format string");
+		spcl_stringify(f.args[j++], buf, SPCL_STR_BSIZE);
+		fputs(buf, stdout);
+	    } else {
+		fputc(*c, stdout);
 	    }
-	    ++c;
-	} else if (*c == '%') {
-	    if (j >= f.n_args)
-		return spcl_make_err(E_LACK_TOKENS, "too few tokens for format string");
-	    spcl_stringify(f.args[j++], buf, SPCL_STR_BSIZE);
-	    fputs(buf, stdout);
-	} else {
-	    fputc(*c, stdout);
 	}
     }
     for (; j < f.n_args; ++j) {
@@ -1897,6 +1898,26 @@ void destroy_spcl_inst(struct spcl_inst* c) {
     free(c);
 }
 /**
+ * Find the length of an operator sequence e.g. '==', '=', '+=' etc.
+ */
+static inline int get_oplen(char op, char next) {
+    //',' and '.' should fall through
+    //TODO: determine whether ommitting this actually causes bugs
+    if (op == ',' || op == '.')
+	return 0;
+    //matches characters '!', '?', '+', '-', '*', '/', '<', '=', '>', '.', and ','. hopefully those last two don't cause problems
+    if ( op == '!' || op == '?' || op == '^' || (op >= '*' && op <= '/') || (op >= '<' && op <= '>') ) {
+	if (next == '=')
+	    return 2;
+	return 1;
+    } else if ( (op == '|' || op == '&') && next == op ) {
+	if (next == op)
+	    return 2;
+	return 1;
+    }
+    return 0;
+}
+/**
  * Get the location of the first operator which is not enclosed in a block expression
  * op_loc: store the location of the operator
  * open_ind: store the location of the first enclosing block
@@ -1913,7 +1934,7 @@ static inline spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, 
     char cur = 0;
 
     //keep track of the precedence of the orders of operation (lower means executed later) ">,=,>=,==,<=,<"=4 "+,-"=3, "*,/"=2, "**"=1
-    char op_prec = 0;
+    int op_prec = 0;
     for (; lbicmp(rs.start, rs.end) < 0 || blk_stk.ptr; rs.start = fs_add(rs.b, rs.start, 1)) {
 	//make sure we don't read past the end of the file
 	if (lbicmp(rs.start, fs_end(rs.b)) >= 0)
@@ -1950,36 +1971,34 @@ static inline spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, 
 	}
 
 	if (blk_stk.ptr == 0) {
-	    //check for operations with higher priorities (higher priorities indicated by op_prec are executed later in order of operations)
-	    if (cur == '=' && next != '=' && prev != '=' && op_prec < 7) {
-		op_prec = 7;
-		*op_loc = rs.start;
-	    } else if (((cur == '=' && next == '=') || cur == '>' || cur == '<') && op_prec < 6) {
-		op_prec = 6;
-		*op_loc = rs.start;
-		//if this is a two character sequence like ==, >=, or <= we need to skip the next sign
-		if (next == '=')
-		    rs.start = fs_add(rs.b, rs.start, 1);
-	    } else if ((cur == '!' || (cur == '&' && next == '&') || (cur == '|' && next == '|')) && op_prec < 5) {
-		op_prec = 5;
-		*op_loc = rs.start;
-		//if this is a two character sequence like ==, >=, or <= we need to skip the next sign
-		if (next != '!')
-		    rs.start = fs_add(rs.b, rs.start, 1);
-	    } else if ((cur == '+' || cur == '-') && prev != 'e'/* && prev != 0*/ && op_prec < 4) {
-		//remember to recurse after we finish looping
-		op_prec = 4;
-		*op_loc = rs.start;
-	    } else if ((cur == '*' || cur == '/') && op_prec < 3) {
-		op_prec = 3;
-		*op_loc = rs.start;
-	    } else if (cur == '^' && op_prec < 2) {
-		op_prec = 2;
-		*op_loc = rs.start;
-	    } else if (op_prec < 1 && cur == '?' && op_prec < 1) {
-		op_prec = 1;
-		*op_loc = rs.start;
-	    } else if (cur == ';' || cur == '\n') {
+	    int oplen = get_oplen(cur, next);
+	    if (oplen > 0) {
+		//check for operations with higher priorities (higher priorities indicated by op_prec are executed later in order of operations)
+		if (cur == '=' && next != '=' && prev != '=' && op_prec < 7) {
+		    op_prec = 7;
+		    *op_loc = rs.start;
+		} else if ((cur == '!' || (cur == '&' && next == '&') || (cur == '|' && next == '|')) && op_prec < 6) {
+		    op_prec = 6;
+		    *op_loc = rs.start;
+		} else if (((cur == '=' && next == '=') || cur == '>' || cur == '<') && op_prec < 5) {
+		    op_prec = 5;
+		    *op_loc = rs.start;
+		} else if ((cur == '+' || cur == '-') && prev != 'e'/* && prev != 0*/ && op_prec < 4) {
+		    //remember to recurse after we finish looping
+		    op_prec = 4;
+		    *op_loc = rs.start;
+		} else if ((cur == '*' || cur == '/') && op_prec < 3) {
+		    op_prec = 3;
+		    *op_loc = rs.start;
+		} else if (cur == '^' && op_prec < 2) {
+		    op_prec = 2;
+		    *op_loc = rs.start;
+		} else if (op_prec < 1 && cur == '?' && op_prec < 1) {
+		    op_prec = 1;
+		    *op_loc = rs.start;
+		}
+		rs.start = fs_add(rs.b, rs.start, oplen-1);
+	    } else if (cur == ';' || cur == '\n' || cur == '#') {
 		break;
 	    }
 	}
@@ -2110,11 +2129,7 @@ spcl_val do_op(spcl_inst* c, read_state rs, lbi op_loc) {
     //some operators (==, >=, <=) take up more than one character, test for these
     char op = fs_get(rs.b, op_loc);
     char next = fs_get(rs.b, fs_add(rs.b, op_loc, 1));
-    int op_width = 1;
-    if (op != '?' && op != '.' && op != '|' && op != '&' && next == '=')
-	op_width = 2;
-    else if ((op == '|' || op == '&') && (next == op))
-	op_width = 2;
+    int op_width = get_oplen(op, next);
     //set a read state before the operator and after the operator
     read_state rs_l = rs;
     read_state rs_r = rs;
@@ -2148,15 +2163,7 @@ spcl_val do_op(spcl_inst* c, read_state rs, lbi op_loc) {
 	    return tmp_val;
 	set_spcl_val_rs(c, rs_l, tmp_val);
 	return spcl_make_none();
-    } else if (op == '!' && op_width == 1) {
-	spcl_val tmp_val = spcl_parse_line_rs(c, rs_r, NULL);
-	if (tmp_val.type == VAL_ERR)
-	    return tmp_val;
-	if (tmp_val.type == VAL_UNDEF || (tmp_val.type == VAL_NUM && tmp_val.val.x == 0))
-	    return spcl_make_num(1);
-	return spcl_make_num(0);
     }
-
     //parse right and left spcl_vals
     spcl_val l = spcl_parse_line_rs(c, rs_l, NULL);
     if (l.type == VAL_ERR)
@@ -2166,11 +2173,8 @@ spcl_val do_op(spcl_inst* c, read_state rs, lbi op_loc) {
 	cleanup_spcl_val(&l);
 	return r;
     }
-    //WLOG fix all array operations to have the array first
-    if (l.type == VAL_NUM && r.type == VAL_ARRAY)
-	swap_val(&l, &r);
     //handle equality comparisons
-    if (op == '!' || op == '=' || op == '>' || op == '<') {
+    if (op == '=' || (op_width == 2 && op == '!') || op == '>' || op == '<') {
 	spcl_val cmp = spcl_valcmp(l,r);
 	cleanup_spcl_val(&l);
 	cleanup_spcl_val(&r);
@@ -2208,6 +2212,7 @@ spcl_val do_op(spcl_inst* c, read_state rs, lbi op_loc) {
 	case '*': val_mul(&l, r);break;
 	case '/': val_div(&l, r);break;
 	case '^': val_exp(&l, r);break;
+	case '!': l = (r.type == VAL_UNDEF || r.val.x == 0)? spcl_make_num(1) : spcl_make_num(0);break;
 	}
 	//if this is a relative assignment, do that
 	if (next == '=') {
@@ -2378,7 +2383,7 @@ static inline spcl_val inds_to_nvp(spcl_inst* c, const spcl_fstream* fs, name_va
 	eq_loc = strchr_block_rs(fs, fs_add(fs, inds[i], 1), inds[i+1], '=');
 	char prev = fs_get(fs, fs_sub(fs, eq_loc, 1));
 	char next = fs_get(fs, fs_add(fs, eq_loc, 1));
-	if (next == '=' || prev == '<' || prev == '>')
+	if (next == '=' || prev == '=' || prev == '<' || prev == '>')
 	    eq_loc = inds[i+1];
 
 	//if there is an '=' sign read the name
@@ -2633,8 +2638,10 @@ int spcl_find_c_str(const spcl_inst* c, const char* str, char* sto, size_t n) {
     if (sto == NULL || n == 0)
 	return 0;
     spcl_val tmp = spcl_find(c, str);
-    if (tmp.type != VAL_STR)
+    if (tmp.type != VAL_STR) {
+	*sto = 0;//set to an empty string
 	return -1;
+    }
     //bounds check
     size_t n_write = (tmp.n_els > n) ? n : tmp.n_els;
     memcpy(sto, tmp.val.s, sizeof(char)*n_write);
@@ -2698,7 +2705,13 @@ spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b) {
 	    return er;
 	}
 	cleanup_spcl_val(&er);
-	rs.start = fs_add(b, end, 1);
+	//if its a comment we should skip this line
+	if (fs_get(b, end) == '#') {
+	    rs.start.line += 1;
+	    rs.start.off = 0;
+	} else {
+	    rs.start = fs_add(b, end, 1);
+	}
     }
     return er;
 }
