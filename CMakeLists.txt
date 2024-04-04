@@ -61,7 +61,7 @@ install(
 #now we make unit tests
 if(BUILD_TESTS MATCHES "y")
     set(TEST_EXE spcl_test)
-    add_compile_definitions(TEST_GEOM_NAME="${CMAKE_SOURCE_DIR}/tests/test.geom")
+    add_compile_definitions(TEST_GEOM_NAME="${CMAKE_SOURCE_DIR}/tests/test.spcl")
     add_compile_definitions(TEST_BENCH_NAME="${CMAKE_SOURCE_DIR}/tests/benchmark.spcl")
     add_compile_definitions(TEST_ASSERT_NAME="${CMAKE_SOURCE_DIR}/tests/assertions.spcl")
     add_executable( ${TEST_EXE} src/tests.cpp )

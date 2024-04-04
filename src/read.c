@@ -80,7 +80,7 @@ static inline char fs_get(const spcl_fstream* fs, lbi pos) {
 /**
  * return how many characters into the line buffer l is
  */
-inline size_t fs_diff(const spcl_fstream* fs, lbi r, lbi l) {
+static inline size_t fs_diff(const spcl_fstream* fs, lbi r, lbi l) {
     size_t ret = 0;
     while (1) {
 	ret += r.off;
@@ -801,6 +801,19 @@ spcl_val spcl_len(struct spcl_inst* c, spcl_fn_call f) {
     spcl_sigcheck(f, ANY1_SIG);
     return spcl_make_num(f.args[0].n_els);
 }
+//create a list with undefined elements
+static const valtype LIST_SIG[] = {VAL_NUM};
+spcl_val spcl_list(struct spcl_inst* c, spcl_fn_call f) {
+    spcl_sigcheck(f, LIST_SIG);
+    if (f.args[0].val.x < 0)
+	return spcl_make_err(E_OUT_OF_RANGE, "cannot create list with negative number of elements");
+    spcl_val ret;
+    ret.type = VAL_LIST;
+    ret.n_els = (size_t)(f.args[0].val.x);
+    ret.val.l = xmalloc(sizeof(spcl_val)*ret.n_els);
+    memset(ret.val.l, 0, sizeof(spcl_val)*ret.n_els);
+    return ret;
+}
 static const valtype RANGE_SIG[] = {VAL_NUM, VAL_NUM, VAL_NUM};
 spcl_val spcl_range(struct spcl_inst* c, spcl_fn_call f) {
     spcl_sigcheck_opts(f, 1, RANGE_SIG);
@@ -1074,6 +1087,9 @@ WRAP_MATH_FN(acos)
 WRAP_MATH_FN(atan)
 WRAP_MATH_FN(log)
 WRAP_MATH_FN(sqrt)
+WRAP_MATH_FN(floor)
+WRAP_MATH_FN(ceil)
+WRAP_MATH_FN(fabs)
 
 /** ============================ struct spcl_val ============================ **/
 
@@ -1833,6 +1849,7 @@ static inline void setup_builtins(struct spcl_inst* c) {
     spcl_add_fn(c, spcl_assert,		"assert");
     spcl_add_fn(c, spcl_typeof,		"typeof");
     spcl_add_fn(c, spcl_len,		"len");
+    spcl_add_fn(c, spcl_list,		"list");
     spcl_add_fn(c, spcl_range,		"range");
     spcl_add_fn(c, spcl_linspace,	"linspace");
     spcl_add_fn(c, spcl_flatten,	"flatten");
@@ -1854,6 +1871,9 @@ static inline void setup_builtins(struct spcl_inst* c) {
     spcl_add_fn(math_c, spcl_exp,	"exp");
     spcl_add_fn(math_c, spcl_log,	"log");
     spcl_add_fn(math_c, spcl_sqrt,	"sqrt");
+    spcl_add_fn(math_c, spcl_floor,	"floor");
+    spcl_add_fn(math_c, spcl_ceil,	"ceil");
+    spcl_add_fn(math_c, spcl_fabs,	"abs");
     spcl_set_val(c, "math", tmp, 0);
 }
 
@@ -1897,13 +1917,15 @@ void destroy_spcl_inst(struct spcl_inst* c) {
     free(c->table);
     free(c);
 }
+#define MAX_OP 128
+static const int OP1_PRECS[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 3, 4, 0, 4, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 7, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+static const int OP2_PRECS[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 6, 0, 0, 0, 7, 7, 0, 7, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0};
 /**
  * Find the length of an operator sequence e.g. '==', '=', '+=' etc.
  */
 static inline int get_oplen(char op, char next) {
-    //',' and '.' should fall through
-    //TODO: determine whether ommitting this actually causes bugs
-    if (op == ',' || op == '.')
+    //return 0 if the character isn't an operator
+    if (op < 0 || op >= MAX_OP || (OP1_PRECS[op] == 0 && OP2_PRECS[op] == 0))
 	return 0;
     //matches characters '!', '?', '+', '-', '*', '/', '<', '=', '>', '.', and ','. hopefully those last two don't cause problems
     if ( op == '!' || op == '?' || op == '^' || (op >= '*' && op <= '/') || (op >= '<' && op <= '>') ) {
@@ -1917,6 +1939,7 @@ static inline int get_oplen(char op, char next) {
     }
     return 0;
 }
+
 /**
  * Get the location of the first operator which is not enclosed in a block expression
  * op_loc: store the location of the operator
@@ -1972,32 +1995,18 @@ static inline spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, 
 
 	if (blk_stk.ptr == 0) {
 	    int oplen = get_oplen(cur, next);
-	    if (oplen > 0) {
-		//check for operations with higher priorities (higher priorities indicated by op_prec are executed later in order of operations)
-		if (cur == '=' && next != '=' && prev != '=' && op_prec < 7) {
-		    op_prec = 7;
+	    if (oplen >= 2) {
+		if (op_prec < OP2_PRECS[cur]) {
 		    *op_loc = rs.start;
-		} else if ((cur == '!' || (cur == '&' && next == '&') || (cur == '|' && next == '|')) && op_prec < 6) {
-		    op_prec = 6;
-		    *op_loc = rs.start;
-		} else if (((cur == '=' && next == '=') || cur == '>' || cur == '<') && op_prec < 5) {
-		    op_prec = 5;
-		    *op_loc = rs.start;
-		} else if ((cur == '+' || cur == '-') && prev != 'e'/* && prev != 0*/ && op_prec < 4) {
-		    //remember to recurse after we finish looping
-		    op_prec = 4;
-		    *op_loc = rs.start;
-		} else if ((cur == '*' || cur == '/') && op_prec < 3) {
-		    op_prec = 3;
-		    *op_loc = rs.start;
-		} else if (cur == '^' && op_prec < 2) {
-		    op_prec = 2;
-		    *op_loc = rs.start;
-		} else if (op_prec < 1 && cur == '?' && op_prec < 1) {
-		    op_prec = 1;
-		    *op_loc = rs.start;
+		    op_prec = OP2_PRECS[cur];
 		}
 		rs.start = fs_add(rs.b, rs.start, oplen-1);
+	    } else if (oplen == 1 && op_prec < OP1_PRECS[cur]) {
+		//avoid matches with numeric literals
+		if (OP1_PRECS[cur] == OP1_PRECS['-'] && (prev == 'e' || prev == 'E'))
+		    continue;
+		*op_loc = rs.start;
+		op_prec = OP1_PRECS[cur];
 	    } else if (cur == ';' || cur == '\n' || cur == '#') {
 		break;
 	    }
@@ -2080,9 +2089,8 @@ static inline spcl_val set_spcl_val_rs(struct spcl_inst* c, read_state rs, spcl_
     lbi ref_loc = strchr_block_rs(rs.b, rs.start, rs.end, '[');//]
     //if there are no dereferences, just access the table directly
     if (!lbicmp(dot_loc, rs.end) && !lbicmp(ref_loc, rs.end)) {
-	char* str = trim_whitespace(fs_get_line(rs.b, rs.start, rs.end, NULL), NULL);
-	spcl_set_val(c, str, p_val, 0);
-	free(str);
+	const char* str = fs_read(rs.b, rs.start);
+	spcl_set_valn(c, str, fs_diff(rs.b, rs.end, rs.start), p_val, 0);
 	return spcl_make_none();
     } else if (lbicmp(dot_loc, ref_loc) < 0) {
 	//access spcl_inst members
@@ -2645,42 +2653,42 @@ int spcl_find_c_str(const spcl_inst* c, const char* str, char* sto, size_t n) {
     //bounds check
     size_t n_write = (tmp.n_els > n) ? n : tmp.n_els;
     memcpy(sto, tmp.val.s, sizeof(char)*n_write);
-    return 0;
+    return (int)n_write;
 }
 int spcl_find_int(const spcl_inst* c, const char* str, int* sto) {
     spcl_val tmp = spcl_find(c, str);
-    if (tmp.type == VAL_NUM)
+    if (tmp.type != VAL_NUM)
 	return -1;
     if (sto) *sto = (int)tmp.val.x;
     return 0;
 }
 int spcl_find_size(const spcl_inst* c, const char* str, size_t* sto) {
     spcl_val tmp = spcl_find(c, str);
-    if (tmp.type == VAL_NUM)
+    if (tmp.type != VAL_NUM)
 	return -1;
     if (sto) *sto = (size_t)tmp.val.x;
     return 0;
 }
 int spcl_find_float(const spcl_inst* c, const char* str, double* sto) {
     spcl_val tmp = spcl_find(c, str);
-    if (tmp.type == VAL_NUM)
+    if (tmp.type != VAL_NUM)
 	return -1;
     if (sto) *sto = tmp.val.x;
     return 0;
 }
-void spcl_set_val(struct spcl_inst* c, const char* p_name, spcl_val p_val, int copy) {
+void spcl_set_valn(struct spcl_inst* c, const char* p_name, size_t namelen, spcl_val p_val, int copy) {
     //generate a fake name if none was provided
     if (!p_name || p_name[0] == 0) {
 	char tmp[SPCL_STR_BSIZE];
 	snprintf(tmp, SPCL_STR_BSIZE, "\e_%lu", c->n_memb);
-	return spcl_set_val(c, tmp, p_val, copy);
+	return spcl_set_valn(c, tmp, namelen, p_val, copy);
     }
-    size_t ti = fnv_1(p_name, SIZE_MAX, c->t_bits);
-    if (!find_ind(c, p_name, SIZE_MAX, &ti)) {
+    size_t ti = fnv_1(p_name, namelen, c->t_bits);
+    if (!find_ind(c, p_name, namelen, &ti)) {
 	//if there isn't already an element with that name we have to expand the table and add a member
 	if (grow_inst(c))
-	    find_ind(c, p_name, SIZE_MAX, &ti);
-	c->table[ti].s = strdup(p_name);
+	    find_ind(c, p_name, namelen, &ti);
+	c->table[ti].s = strndup(p_name, namelen);
 	c->table[ti].v = (copy)? copy_spcl_val(p_val) : p_val;
 	++c->n_memb;
     } else {

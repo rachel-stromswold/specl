@@ -331,6 +331,9 @@ TEST_CASE("operations") {
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 1.1);
         //order of operations
+        strncpy(buf, "2*2-1", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        tmp_val = spcl_parse_line(sc, buf);
+	test_num(tmp_val, 3);
         strncpy(buf, "1+3/2", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 2.5);
@@ -1251,13 +1254,22 @@ spcl_val spcl_gen_box(spcl_inst* c, spcl_fn_call f) {
     spcl_set_val(ret.val.c, "pt_2", f.args[1], 1);
     return ret;
 }
+static const valtype QUAD_SIG[] = {VAL_NUM};
+spcl_val spcl_quad_trap(spcl_inst* c, spcl_fn_call f) {
+    spcl_sigcheck(f, QUAD_SIG);
+    spcl_val ret = spcl_make_inst(c, "quad_pot");
+    spcl_set_val(ret.val.c, "k", f.args[0], 0);
+    return ret;
+}
 void setup_geometry_inst(spcl_inst* con) {
     //we have to set up the spcl_inst with all of our functions
-    spcl_set_val(con, "Gaussian_source", spcl_make_fn("Gaussian_source", 6, &spcl_gen_gaussian_source), 0);
-    spcl_set_val(con, "Box", spcl_make_fn("Box", 2, &spcl_gen_box), 0);
+    spcl_add_fn(con, spcl_gen_gaussian_source, "Gaussian_source");
+    spcl_add_fn(con, spcl_gen_box, "Box");
+    spcl_add_fn(con, spcl_quad_trap, "quad_pot");
 }
 
 TEST_CASE("file parsing") {
+    const size_t N_FLTS = 10;
     char buf[SPCL_STR_BSIZE];
     spcl_fstream* fs = make_spcl_fstream(TEST_GEOM_NAME);
     spcl_inst* c = make_spcl_inst(NULL);
@@ -1266,11 +1278,11 @@ TEST_CASE("file parsing") {
     CHECK(er.type != VAL_ERR);
     spcl_val v = spcl_find(c, "offset");
     CHECK(v.type == VAL_NUM);CHECK(v.val.x == 0.2);
-    v = spcl_find(c, "list");
+    v = spcl_find(c, "lst");
     CHECK(v.type == VAL_LIST);
-    v = spcl_find(c, "sum_list");
+    v = spcl_find(c, "sum_lst");
     CHECK(v.type == VAL_NUM);CHECK(v.val.x == 11);
-    v = spcl_find(c, "prod_list");
+    v = spcl_find(c, "prod_lst");
     CHECK(v.type == VAL_NUM);CHECK(v.val.x == 24.2);
     v = spcl_find(c, "acid_test");
     CHECK(v.type == VAL_NUM);CHECK(v.val.x == 16);
@@ -1300,12 +1312,37 @@ TEST_CASE("file parsing") {
     CHECK(spcl_true(spcl_parse_line(c, buf)));
     strncpy(buf, "gs.region.pt_2 == vec(.4, 0.4, .2)", SPCL_STR_BSIZE);
     CHECK(spcl_true(spcl_parse_line(c, buf)));
+    //now try using the builtin find functions
+    int n;
+    size_t len;
+    double flts[N_FLTS];
+    spcl_inst* sub;
+    REQUIRE(spcl_find_object(c, "gs", "Gaussian_source", &sub) == 0);
+    //string lookups
+    CHECK(spcl_find_c_str(sub, "component", buf, SPCL_STR_BSIZE) == 3);
+    CHECK(strcmp(buf, "Ey") == 0);
+    CHECK(spcl_find_float(sub, "wavelength", flts) == 0);
+    CHECK(flts[0] == 1.5);
+    CHECK(spcl_find_int(sub, "wavelength", &n) == 0);
+    CHECK(n == 1);
+    CHECK(spcl_find_size(sub, "amplitude", &len) == 0);
+    CHECK(len == 7);
+    //array lookups
+    REQUIRE(spcl_find_object(sub, "region", "Box", &sub) == 0);
+    REQUIRE(spcl_find_c_array(sub, "pt_1", flts, N_FLTS) == 3);
+    CHECK(flts[0] == 0);CHECK(flts[1] == 0);CHECK(flts[2] == 0.2);
+    REQUIRE(spcl_find_c_array(sub, "pt_2", flts, N_FLTS) == 3);
+    CHECK(flts[0] == 0.4);CHECK(flts[1] == 0.4);CHECK(flts[2] == 0.2);
+    REQUIRE(spcl_find_object(c, "potential", "quad_pot", &sub) == 0);
+    CHECK(spcl_find_float(sub, "k", flts) == 0);
+    CHECK(flts[0] == 4);
+    //cleanup
     destroy_spcl_fstream(fs);
     destroy_spcl_inst(c);
 }
 
 TEST_CASE("benchmarks") {
-    const size_t N_RUNS = 100;
+    const size_t N_RUNS = 1000;
     double times[N_RUNS];
     double mean, var;
     spcl_val er;
