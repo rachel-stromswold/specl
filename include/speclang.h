@@ -233,7 +233,6 @@ void destroy_spcl_fstream(spcl_fstream* fs);
  */
 void spcl_fstream_append(spcl_fstream* fs, const char* str);
 #if SPCL_DEBUG_LVL>0
-int it_single(const spcl_fstream* fs, char** linesto, char start_delim, char end_delim, lbi* start, lbi* end, int* pdepth, int include_delims, int include_start);
 /**
  * Return a string with the line contained between indices b (inclusive) and e (not inclusive).
  * fs: the spcl_fstream to read
@@ -253,16 +252,7 @@ char* fs_get_line(const spcl_fstream* fs, lbi b, lbi e, size_t* len);
  * include_start: if true, then the part preceeding the first instance of start_delim will be included. This spcl_val is always false if include_delims is false. If include_delims is true, then this defaults to true.
  * returns: a spcl_fstream object which should be destroyed with a call to spcl_destroy_fstream().
  */
-spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, lbi start, lbi* pend, char start_delim, char end_delim, int include_delims, int include_start);
-/**
- * Jump to the end of the next enclosed block started with a start_delim character
- * fs: the linebuffer
- * start: the location from which we start seeking
- * start_delim: the starting delimeter to look for (e.g. '(','{'... corresponding to ')','}'... respectively)
- * end_delim: the ending delimiter to look for, see above
- * include_delims: if true, then include the delimeter in the libe buffer
- */
-lbi fs_jmp_enclosed(spcl_fstream* fs, lbi start, char start_delim, char end_delim, int include_delims);
+spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, lbi start, lbi end);
 /**
  * Returns a version of the line buffer which is flattened so that everything fits onto one line.
  * sep_char: each newline in the buffer is replaced by a sep_char, unless sep_char=0 in which no characters are inserted
@@ -479,6 +469,8 @@ void destroy_spcl_inst(spcl_inst* c);
  */
 #if SPCL_DEBUG_LVL>0
 spcl_val do_op(struct spcl_inst* c, read_state rs, lbi op_loc);
+read_state make_read_state(const spcl_fstream* fs, lbi s, lbi e);
+spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind, lbi* new_end);
 #endif
 /**
  * Search the spcl_inst for the variable with the matching name.
@@ -499,11 +491,29 @@ int spcl_find_object(const spcl_inst* c, const char* str, const char* type, spcl
  * Lookup the spcl_val named str in c and write the first n elements of the resulting list/array to sto
  * c: the spcl_inst to search
  * str: the name to lookup
- * sto: the array to save to
+ * sto: the array to save to. At most n values are written. If the spcl_array found has m elements and m<n, then all values sto[i] with i>=m are not modified.
  * n: the length of sto
  * returns: the number of elements written on success or a negative spcl_val if an error occurred (-1 indicates no match, -2 indicates match of the wrong type, -3 indicates an invalid element)
  */
-int spcl_find_c_array(const spcl_inst* c, const char* str, double* sto, size_t n);
+int spcl_find_c_iarray(const spcl_inst* c, const char* str, int* sto, size_t n);
+/**
+ * Lookup the spcl_val named str in c and write the first n elements of the resulting list/array to sto
+ * c: the spcl_inst to search
+ * str: the name to lookup
+ * sto: the array to save to. At most n values are written. If the spcl_array found has m elements and m<n, then all values sto[i] with i>=m are not modified.
+ * n: the length of sto
+ * returns: the number of elements written on success or a negative spcl_val if an error occurred (-1 indicates no match, -2 indicates match of the wrong type, -3 indicates an invalid element)
+ */
+int spcl_find_c_uarray(const spcl_inst* c, const char* str, unsigned* sto, size_t n);
+/**
+ * Lookup the spcl_val named str in c and write the first n elements of the resulting list/array to sto
+ * c: the spcl_inst to search
+ * str: the name to lookup
+ * sto: the array to save to. At most n values are written. If the spcl_array found has m elements and m<n, then all values sto[i] with i>=m are not modified.
+ * n: the length of sto
+ * returns: the number of elements written on success or a negative spcl_val if an error occurred (-1 indicates no match, -2 indicates match of the wrong type, -3 indicates an invalid element)
+ */
+int spcl_find_c_darray(const spcl_inst* c, const char* str, double* sto, size_t n);
 /**
  * Lookup the spcl_val named str in c and write the string sto
  * c: the spcl_inst to search
@@ -522,7 +532,7 @@ int spcl_find_int(const spcl_inst* c, const char* str, int* sto);
  * lookup the unsigned integer spcl_val in c at str and save to sto.
  * returns: 0 on success or -1 if the name str couldn't be found
  */
-int spcl_find_size(const spcl_inst* c, const char* str, size_t* sto);
+int spcl_find_uint(const spcl_inst* c, const char* str, unsigned* sto);
 /**
  * lookup the floating point spcl_val in c at str and save to sto.
  * returns: 0 on success or -1 if the name str couldn't be found

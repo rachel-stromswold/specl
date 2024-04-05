@@ -379,8 +379,10 @@ int lbicmp(lbi l, lbi r) {
 	return 1;
     return 0;
 }
-
-static inline read_state make_read_state(const spcl_fstream* fs, lbi s, lbi e) {
+#if SPCL_DEBUG_LVL==0
+static inline
+#endif
+read_state make_read_state(const spcl_fstream* fs, lbi s, lbi e) {
     read_state rs;
     rs.b = fs;
     rs.start = s;
@@ -483,104 +485,6 @@ void spcl_fstream_append(spcl_fstream* fs, const char* str) {
 }
 //Below are protected functions in fstream. They are not intended to be used by external libraries.
 
-/**
- * helper function for get_enclosed and jmp_enclosed. This function reads the line at index k for the line contained between start_delim and end_delim. If only a start_delim is found or start_ind is not NULL, a pointer with a spcl_val set to the index of the start of the line is returned.
- * linesto: store the line read into this variable
- * start_delim: the starting delimiter
- * end_delim: the ending delimiter
- * start: the position to start reading. This is updated as soon as the start delimiter is actually found
- * end: the position where reading stopped. This will be at offset 0 on the line after start->line if an end delimiter was not found or the character where reading stopped because of an end delimiter.
- * includ_delims: if true, then the delimiters are included in the string
- * start_ind: a pointer, the spcl_val of which is the index in the line k to start reading.
- * depth: keeps track of how many nested pairs of start and end delimeters we've encountered. We only want to exit calling if an end_delim was found. This variable is set to -1 if a zero depth close brace was found to signal that parsing should terminate.
- * end_line: If end delim is set, then the spcl_val in end_line is set to k.
- * jp: stores the index where line reading stopped. Either because a NULL terminator was encountered or an end_delim was encountered
- * returns: an index of the position of the index that reading started from or -1 if not found
- */
-#if SPCL_DEBUG_LVL==0
-static
-#endif
-int it_single(const spcl_fstream* fs, char** linesto, char start_delim, char end_delim, lbi* start, lbi* end, int* pdepth, int include_delims, int include_start) {
-    int free_after = 0;
-    if (start == NULL) {
-        start = xmalloc(sizeof(lbi));
-        start->line = 0;
-        start->off = 0;
-    }
-    int depth = 0;
-    if (pdepth)
-        depth = *pdepth;
-    size_t j = start->off;
-    size_t init_off = start->off;
-    int ret = -1;
-    //iterate through characters in the line looking for an end_delim without a preceeding start_delim
-    size_t i = start->line;
-    end->line = i;
-    while (1) {
-        if (fs->lines[i][j] == 0) {
-            if (end) {
-                end->line = i + 1;
-                end->off = j;
-            }
-            break;
-        } else if (fs->lines[i][j] == start_delim) {
-	    //this is a special case, depths may only be toggled
-            if (end_delim == start_delim) {
-                if (j == 0 || fs->lines[i][j - 1] != '\\') {
-                    depth = 1 - depth;
-                    if (depth == 1) {
-			//start block
-                        start->line = i;
-                        start->off = j;
-                        ret = j;
-                        if (!include_delims)
-                            ++(start->off);
-                    } else {
-			//end block
-                        if (end) {
-                            if (include_delims)
-                                ++j;
-                            end->off = j;
-                        }
-                        break;
-                    }
-                }
-            } else {
-                if (depth == 0) {
-                    start->line = i;
-                    start->off = j;
-                    ret = j;
-                    if (!include_delims)
-                        ++(start->off);
-                }
-                ++depth;
-            }
-        } else if (fs->lines[i][j] == end_delim) {
-            --depth;
-            if (depth <= 0) {
-                if (include_delims)
-                    ++j;
-                if (end)
-                    end->off = j;
-                break;
-            }
-        }
-        ++j;
-    }
-    if (pdepth)
-        *pdepth = depth;
-    if (linesto) {
-        if (include_start)
-            *linesto = fs->lines[i] + init_off;
-        else
-            *linesto = fs->lines[i] + (start->off);
-    }
-    if (include_start)
-        start->off = init_off;
-    if (free_after)
-        free(start);
-    return ret;
-}
 #if SPCL_DEBUG_LVL<1
 static
 #endif
@@ -607,81 +511,27 @@ char* fs_get_line(const spcl_fstream* fs, lbi b, lbi e, size_t* n) {
     return ret;
 }
 #if SPCL_DEBUG_LVL<1
-static
+static inline
 #endif
-spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, lbi start, lbi* pend, char start_delim, char end_delim, int include_delims, int include_start) {
+spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, lbi start, lbi end) {
     spcl_fstream* ret = alloc_fstream();
-    //initialization
-    if (pend) {
-        pend->line = fs->n_lines;
-        pend->off = 0;
+    if (lbicmp(start, end) >= 0) {
+	ret->n_lines = 0;
+	ret->lines = NULL;
+	ret->line_sizes = NULL;
+	return ret;
     }
-    if (fs->n_lines == 0) {
-        ret->n_lines = 0;
-        ret->lines = NULL;
-        ret->line_sizes = NULL;
-        return ret;
+    ret->n_lines = end.line - start.line + 1;
+    ret->lines = xmalloc(sizeof(char*)*ret->n_lines);
+    ret->line_sizes = xmalloc(sizeof(size_t)*ret->n_lines);
+    //the first line will be smaller
+    ret->line_sizes[0] = fs->line_sizes[start.line] - start.off;
+    ret->lines[0] = strndup(fs->lines[start.line]+start.off, ret->line_sizes[0]);
+    //copy everything else directly
+    for (size_t i = 1; i < ret->n_lines; ++i) {
+	ret->line_sizes[i] = (i+1 == ret->n_lines) ? end.off : fs->line_sizes[i+start.line];
+	ret->lines[i] = strndup(fs->lines[i+start.line], ret->line_sizes[i]);
     }
-    //set include_start to false if include_delims is false
-    include_start &= include_delims;
-    ret->lines = xmalloc(sizeof(char*) * fs->n_lines);
-    ret->line_sizes = xmalloc(sizeof(size_t) * fs->n_lines);
-    //tracking variables
-    int depth = 0;
-
-    //iterate through lines
-    size_t k = 0;
-    size_t start_line = start.line;
-    lbi end;
-    size_t i = start.line;
-    int started = 0;
-    for (; depth >= 0 && i < fs->n_lines; ++i) {
-        if (fs->lines[i] == NULL) {
-            ret->n_lines = i - start_line;
-            break;
-        } else {
-            end.line = i;
-            end.off = 0;
-            char* this_line;
-            int start_ind = it_single(fs, &this_line, start_delim, end_delim, &start, &end, &depth, include_delims, include_start);
-            if (start_ind >= 0)
-                started = 1;
-	    //don't read empty lines
-            if (started) {
-                ret->line_sizes[k] = end.off - start.off;
-                ret->lines[k++] = strndup(this_line, end.off - start.off);
-            }
-	    //This means that an end delimeter was found. In this case, we need to break out of the loop.
-            if (end.line == start.line)
-                break;
-            start.off = 0;
-            ++start.line;
-        }
-    }
-    if (pend)
-        *pend = end;
-    ret->n_lines = k;
-    return ret;
-}
-
-#if SPCL_DEBUG_LVL<1
-static
-#endif
-lbi fs_jmp_enclosed(spcl_fstream* fs, lbi start, char start_delim, char end_delim, int include_delims) {
-    int depth = 0;
-    for (size_t i = start.line; depth >= 0 && i < fs->n_lines; ++i) {
-        lbi end;
-        end.line = i;
-        end.off = 0;
-        it_single(fs, NULL, start_delim, end_delim, &start, &end, &depth, include_delims, 0);
-        if (end.line == start.line)
-            return end;
-        start.off = 0;
-        ++start.line;
-    }
-    lbi ret;
-    ret.line = fs->n_lines;
-    ret.off = 0;
     return ret;
 }
 static inline const char* fs_read(const spcl_fstream* fs, lbi s) {
@@ -1947,7 +1797,10 @@ static inline int get_oplen(char op, char next) {
  * close_ind: store the location of the last escaping block
  * returns: the index of the first expression or 0 in the event of an error (it is impossible for a valid expression to have an operator as the first character)
  */
-static inline spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind, lbi* new_end) {
+#if SPCL_DEBUG_LVL==0
+static inline
+#endif
+spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind, lbi* new_end) {
     *op_loc = rs.end;
     *open_ind = rs.end;*close_ind = rs.end;
     //keeps track of open and close [], (), {}, and ""
@@ -2024,6 +1877,32 @@ static inline spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, 
 //forward declare so that helpers can call
 static inline spcl_val spcl_parse_line_rs(spcl_inst* c, read_state rs, lbi* new_end);
 /**
+ * A helper which accesses v[ind]. If assign is not NULL, then v[ind] = *assign.
+ */
+static inline spcl_val _spcl_index(spcl_val v, spcl_val ind, spcl_val* assign) {
+    //check for invalid types
+    if (ind.type != VAL_NUM)
+	return spcl_make_err(E_BAD_TYPE, "cannot index with type %s", valnames[ind.type]);
+    if (-(ind.val.x) > v.n_els || ind.val.x >= v.n_els)
+	return spcl_make_err(E_OUT_OF_RANGE, "index %d out of bounds for list of size %lu", (int)ind.val.x, v.n_els);
+    size_t i = (ind.val.x < 0)? v.n_els - (size_t)(-ind.val.x) : (size_t)ind.val.x;
+    //create a new dummy value or return the element depending on type
+    if (v.type == VAL_LIST || v.type == VAL_MAT) {
+	if (assign)
+	    v.val.l[i] = *assign;
+	return v.val.l[i];
+    } else if (v.type == VAL_ARRAY) {
+	if (assign) {
+	    if (assign->type != VAL_NUM)
+		return spcl_make_err(E_BAD_TYPE, "cannot assign type %s to array", valnames[assign->type]);
+	    v.val.a[i] = assign->val.x;
+	}
+	//in principle this should be a reference, but numerics are trivially destructable so it doesn't matter
+	return spcl_make_num(v.val.a[i]);
+    }
+    return spcl_make_err(E_BAD_TYPE, "type %s is not indexable", valnames[v.type]);
+}
+/**
  * An alternative to lookup which only considers the first n bytes in str
  */
 static inline spcl_val spcl_find_rs(spcl_inst* c, read_state rs) {
@@ -2056,29 +1935,10 @@ static inline spcl_val spcl_find_rs(spcl_inst* c, read_state rs) {
 	lbi close_ind = strchr_block_rs(rs.b, fs_add(rs.b, ref_loc, 1), rs.end, /*[*/']');
 	if (lbicmp(close_ind, rs.end) > 0)
 	    return spcl_make_err(E_BAD_SYNTAX, /*[*/"expected ']'");
-	//read the index
-	spcl_val index = spcl_parse_line_rs(c, make_read_state(rs.b, fs_add(rs.b, ref_loc, 1), close_ind), NULL);
-	if (index.type == VAL_ERR)
-	    return index;
-	if (index.type != VAL_NUM)
-	    return spcl_make_err(E_BAD_TYPE, "cannot index list with type %s", valnames[index.type]);
-	//read the list and convert to an absolute index
+	//read the list and the index
 	spcl_val lst = spcl_find_rs(c, make_read_state(rs.b, rs.start, ref_loc));
-	size_t i = index_to_abs(&index, lst.n_els);
-	//branch based on type
-	if (lst.type == VAL_LIST || lst.type == VAL_MAT) {
-	    //the user might want to access a variable in a list of objects, handle that case
-	    if (lbicmp(dot_loc, rs.end) < 0) {
-		if (lst.val.l[i].type != VAL_INST)
-		    return spcl_make_err(E_BAD_TYPE, "cannot access member from non instance type %s", valnames[lst.val.l[i].type]);
-		return spcl_find_rs(lst.val.l[i].val.c, make_read_state(rs.b, fs_add(rs.b, close_ind, 1), rs.end));
-	    }
-	    return lst.val.l[i];
-	} else if (lst.type == VAL_ARRAY) {
-	    return spcl_make_num(lst.val.a[i]);
-	} else {
-	    return spcl_make_err(E_BAD_TYPE, "cannot index type %s", valnames[lst.type]);
-	}
+	spcl_val index = spcl_parse_line_rs(c, make_read_state(rs.b, fs_add(rs.b, ref_loc, 1), close_ind), NULL);
+	return _spcl_index(lst, index, NULL);
     }
 }
 /**
@@ -2091,7 +1951,7 @@ static inline spcl_val set_spcl_val_rs(struct spcl_inst* c, read_state rs, spcl_
     if (!lbicmp(dot_loc, rs.end) && !lbicmp(ref_loc, rs.end)) {
 	const char* str = fs_read(rs.b, rs.start);
 	spcl_set_valn(c, str, fs_diff(rs.b, rs.end, rs.start), p_val, 0);
-	return spcl_make_none();
+	return p_val;
     } else if (lbicmp(dot_loc, ref_loc) < 0) {
 	//access spcl_inst members
 	spcl_val sub_con = spcl_find_rs(c, make_read_state(rs.b, rs.start, dot_loc));
@@ -2101,30 +1961,12 @@ static inline spcl_val set_spcl_val_rs(struct spcl_inst* c, read_state rs, spcl_
     } else {
 	//access lists/arrays
 	lbi close_ind = strchr_block_rs(rs.b, fs_add(rs.b, ref_loc, 1), rs.end, /*[*/']');
-	if (lbicmp(close_ind, rs.end) > 0) return spcl_make_err(E_BAD_SYNTAX, /*[*/"expected ']'");
-	//read the index
-	spcl_val index = spcl_parse_line_rs(c, make_read_state(rs.b, fs_add(rs.b, ref_loc, 1), close_ind), NULL);
-	if (index.type == VAL_ERR) return index;
-	if (index.type != VAL_NUM) return spcl_make_err(E_BAD_TYPE, "cannot index list with type %s", valnames[index.type]);
-	//read the list and convert to an absolute index
+	if (lbicmp(close_ind, rs.end) > 0)
+	    return spcl_make_err(E_BAD_SYNTAX, /*[*/"expected ']'");
+	//read the list and the index
 	spcl_val lst = spcl_find_rs(c, make_read_state(rs.b, rs.start, ref_loc));
-	size_t i = index_to_abs(&index, lst.n_els);
-	//branch based on type
-	if (lst.type == VAL_LIST || lst.type == VAL_MAT) {
-	    //the user might want to access a variable in a list of objects, handle that case
-	    if (lbicmp(dot_loc, rs.end) < 0) {
-		if (lst.val.l[i].type != VAL_INST)
-		    return spcl_make_err(E_BAD_TYPE, "cannot access member from non instance type %s", valnames[lst.val.l[i].type]);
-		return set_spcl_val_rs(lst.val.l[i].val.c, make_read_state(rs.b, fs_add(rs.b, close_ind, 1), rs.end), p_val);
-	    }
-	    lst.val.l[i] = p_val;
-	} else if (lst.type == VAL_ARRAY) {
-	    if (p_val.type != VAL_NUM)
-		return spcl_make_err(E_BAD_TYPE, "cannot assign type %s to array", valnames[p_val.type]);
-	    lst.val.a[i] = p_val.val.x;
-	} else {
-	    return spcl_make_err(E_BAD_TYPE, "cannot index type %s", valnames[lst.type]);
-	}
+	spcl_val index = spcl_parse_line_rs(c, make_read_state(rs.b, fs_add(rs.b, ref_loc, 1), close_ind), NULL);
+	return _spcl_index(lst, index, &p_val);
     }
     return spcl_make_none();
 }
@@ -2502,29 +2344,11 @@ static inline spcl_val parse_literal_func(struct spcl_inst* c, read_state rs, lb
 
 //parse table declaration statements
 static inline spcl_val parse_literal_table(struct spcl_inst* c, read_state rs, lbi open_ind, lbi close_ind) {
-    spcl_val ret;
-    //read the indices
-    lbi* inds = csv_to_inds(rs.b, open_ind, close_ind, &ret.n_els);
-    if (ret.n_els == 0)
-	return spcl_make_err(E_BAD_SYNTAX, "overlapping parentheses (something really weird happened)");
-    //allocate memory to hold the nvps
-    name_val_pair* nvps = xmalloc(sizeof(name_val_pair)*ret.n_els);
-    ret.val.c = make_spcl_inst(c);
-    //read each spcl_val
-    spcl_val er = inds_to_nvp(c, rs.b, nvps, inds, &ret.n_els);
-    if (er.type == VAL_ERR) {
-	destroy_spcl_inst(ret.val.c);
-	free(inds);
-	return er;
-    }
-    //transfer each spcl_val
-    for (size_t i = 0; i < ret.n_els; ++i) {
-	spcl_set_val(ret.val.c, nvps[i].s, nvps[i].v, 0);
-	free(nvps[i].s);
-    }
-    ret.type = VAL_INST;
-    free(nvps);
-    free(inds);
+    //create a new context and start reading
+    spcl_val ret = spcl_make_inst(c, NULL);
+    spcl_fstream* sub_fs = fs_get_enclosed(rs.b, fs_add(rs.b, open_ind, 1), close_ind);
+    spcl_read_lines(ret.val.c, sub_fs);
+    destroy_spcl_fstream(sub_fs);
     return ret;
 }
 
@@ -2581,14 +2405,15 @@ static inline spcl_val spcl_parse_line_rs(struct spcl_inst* c, read_state rs, lb
 	    //if there are enclosed blocks then we need to read those
 	    switch (fs_get(rs.b, open_ind)) {
 	    case '\"': sto.type = VAL_STR; sto.val.s = fs_get_line(rs.b, fs_add(rs.b, open_ind, 1), close_ind, &sto.n_els);sto.n_els += 1;break; //"
-	    case '[':  return (is_var)? copy_spcl_val(spcl_find_rs(c, rs)) : parse_literal_list(c, rs, open_ind, close_ind);break; //]
-	    case '{':  return parse_literal_table(c, rs, open_ind, close_ind);break; //}
-	    case '(':  return parse_literal_func(c, rs, open_ind, close_ind, new_end);break; //)
+	    case '[':  sto = (is_var)? copy_spcl_val(spcl_find_rs(c, rs)) : parse_literal_list(c, rs, open_ind, close_ind);break; //]
+	    case '{':  sto = parse_literal_table(c, rs, open_ind, close_ind);break; //}
+	    case '(':  sto = parse_literal_func(c, rs, open_ind, close_ind, new_end);break; //)
 	    }
 	}
     } else {
 	return do_op(c, rs, op_loc);
     }
+    //TODO: the current implementation may leak memory if the user declares a variable without assigning it. I still haven't decided upon the most elegant solution
     return sto;
 }
 spcl_val spcl_parse_line(spcl_inst* c, char* str) {
@@ -2621,7 +2446,35 @@ int spcl_find_object(const spcl_inst* c, const char* str, const char* typename, 
     if (sto) *sto = vobj.val.c;
     return 0;
 }
-int spcl_find_c_array(const spcl_inst* c, const char* str, double* sto, size_t n) {
+int spcl_find_c_iarray(const spcl_inst* c, const char* str, int* sto, size_t n) {
+    if (sto == NULL || n == 0)
+	return 0;
+    spcl_val tmp = spcl_find(c, str);
+    if (!tmp.type)
+	return -1;
+    //bounds check
+    size_t n_write = (tmp.n_els > n) ? n : tmp.n_els;
+    for (size_t i = 0; i < n_write; ++i) {
+	spcl_val sub = _spcl_index(tmp, spcl_make_num(i), NULL);
+	sto[i] = (int)sub.val.x;
+    }
+    return (int)n_write;
+}
+int spcl_find_c_uarray(const spcl_inst* c, const char* str, unsigned* sto, size_t n) {
+    if (sto == NULL || n == 0)
+	return 0;
+    spcl_val tmp = spcl_find(c, str);
+    if (!tmp.type)
+	return -1;
+    //bounds check
+    size_t n_write = (tmp.n_els > n) ? n : tmp.n_els;
+    for (size_t i = 0; i < n_write; ++i) {
+	spcl_val sub = _spcl_index(tmp, spcl_make_num(i), NULL);
+	sto[i] = (unsigned)sub.val.x;
+    }
+    return (int)n_write;
+}
+int spcl_find_c_darray(const spcl_inst* c, const char* str, double* sto, size_t n) {
     if (sto == NULL || n == 0)
 	return 0;
     spcl_val tmp = spcl_find(c, str);
@@ -2662,7 +2515,7 @@ int spcl_find_int(const spcl_inst* c, const char* str, int* sto) {
     if (sto) *sto = (int)tmp.val.x;
     return 0;
 }
-int spcl_find_size(const spcl_inst* c, const char* str, size_t* sto) {
+int spcl_find_uint(const spcl_inst* c, const char* str, unsigned* sto) {
     spcl_val tmp = spcl_find(c, str);
     if (tmp.type != VAL_NUM)
 	return -1;
@@ -2710,9 +2563,9 @@ spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b) {
 	if (er.type == VAL_ERR) {
 	    if (c->parent == NULL)
 		fprintf(stderr, "Error %s on line %lu: %s\n", errnames[er.val.e->c], rs.start.line+1, er.val.e->msg);
+	    cleanup_spcl_val(&er);
 	    return er;
 	}
-	cleanup_spcl_val(&er);
 	//if its a comment we should skip this line
 	if (fs_get(b, end) == '#') {
 	    rs.start.line += 1;
@@ -2721,7 +2574,7 @@ spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b) {
 	    rs.start = fs_add(b, end, 1);
 	}
     }
-    return er;
+    return spcl_make_none();
 }
 
 spcl_inst* spcl_inst_from_file(const char* fname, spcl_val* error, int argc, char** argv) {

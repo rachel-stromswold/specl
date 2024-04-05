@@ -2,6 +2,11 @@
 foo = [1, 2, 3, 4]
 foo[0] = 2
 assert(foo[0] == 2)
+bar = foo[1] + 1
+print("bar = %, foo_1 = %\n", bar, foo[1])
+sum = 0
+foo = [(sum += f) for f in foo]
+assert(sum == 11)
 
 # operations
 num_add = +1
