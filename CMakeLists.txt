@@ -5,7 +5,7 @@ set(SPCL_LIB speclang)
 
 #set names for applications
 if(CMAKE_BUILD_TYPE MATCHES "^[Dd]ebug")
-
+    set(BUILD_TESTS "y")
     set(CMAKE_BUILD_TYPE Debug)
     set(CMAKE_CXX_FLAGS "-Og -Wall -Wextra -Wpedantic")
     set(CMAKE_C_FLAGS "-Og -Wall")
