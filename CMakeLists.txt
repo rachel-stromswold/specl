@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.5.0)
-project(speclang VERSION 0.3.0 DESCRIPTION "A C library for reading complicated configuration settings")
+project(speclang VERSION 0.3.1 DESCRIPTION "A C library for reading complicated configuration settings")
 set(CMAKE_DEBUG_POSTFIX d)
 set(SPCL_LIB speclang)
+set(TEST_EXE spcl_test)
+set(SPCL_EXE spcl)
 
 #set names for applications
 if(CMAKE_BUILD_TYPE MATCHES "^[Dd]ebug")
@@ -16,7 +18,8 @@ endif()
 
 #shamelessly stolen from https://dominikberner.ch/cmake-library-setup
 add_library(${SPCL_LIB})
-#add_library(${SPCL_LIB}::${SPCL_LIB} ALIAS ${SPCL_LIB})
+#create the stand-alone executable for interpreting scripts
+#add package metadata
 set_target_properties(${SPCL_LIB} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR} VISIBILITY_INLINES_HIDDEN TRUE)
 target_sources(${SPCL_LIB} PRIVATE src/read.c)
 target_include_directories(
@@ -58,9 +61,14 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/speclang
 )
 
+#build the executable for standalone files and install it
+add_executable(${SPCL_EXE} src/spcl.c)
+target_link_libraries(${SPCL_EXE} m ${SPCL_LIB})
+#set_target_properties(${SPCL_EXE} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR} VISIBILITY_INLINES_HIDDEN TRUE)
+install(TARGETS ${SPCL_EXE} DESTINATION ${CMAKE_INSTALL_BINDIR})
+
 #now we make unit tests
 if(BUILD_TESTS MATCHES "y")
-    set(TEST_EXE spcl_test)
     add_compile_definitions(TEST_GEOM_NAME="${CMAKE_SOURCE_DIR}/tests/test.spcl")
     add_compile_definitions(TEST_BENCH_NAME="${CMAKE_SOURCE_DIR}/tests/benchmark.spcl")
     add_compile_definitions(TEST_ASSERT_NAME="${CMAKE_SOURCE_DIR}/tests/assertions.spcl")
