@@ -991,7 +991,7 @@ TEST_CASE("spcl_inst parsing") {
     SUBCASE ("with nesting") {
 	const char* lines[] = { "a = {name = \"apple\";", "spcl_vals = [20, 11]}", "b = a.spcl_vals[0]", "c = a.spcl_vals[1] + a.spcl_vals[0]+1" }; 
 	size_t n_lines = sizeof(lines)/sizeof(char*);
-	spcl_fstream* fs = make_spcl_fstream(NULL);
+	spcl_fstream* fs = make_spcl_fstreamn(NULL, 0);
 	for (size_t i = 0; i < n_lines; ++i)
 	    spcl_fstream_append(fs, lines[i]);
 	spcl_inst* c = make_spcl_inst(NULL);
@@ -1053,7 +1053,7 @@ TEST_CASE("spcl_inst parsing") {
 
 	const char* lines[] = {
 	    "test_fun = fn(i) {",
-	    "return (i < 2)? \"a\" : 2",
+	    "return (i < 2)? \"a\" : \"b\"",
 	    "}",
 	    "a = test_fun(1);b=test_fun(10)" };
 	size_t n_lines = sizeof(lines)/sizeof(char*);
@@ -1070,7 +1070,8 @@ TEST_CASE("spcl_inst parsing") {
 	REQUIRE(val_a.type == VAL_STR);
 	CHECK(strcmp(val_a.val.s, "a") == 0);
 	spcl_val val_b = spcl_find(c, "b");
-	test_num(val_b, 2);
+	REQUIRE(val_a.type == VAL_STR);
+	CHECK(strcmp(val_a.val.s, "b") == 0);
 	destroy_spcl_inst(c);
     }
     SUBCASE ("stress test") {
@@ -1213,6 +1214,32 @@ TEST_CASE("file parsing") {
     CHECK(flts[0] == 4);
     //cleanup
     destroy_spcl_fstream(fs);
+    destroy_spcl_inst(c);
+}
+TEST_CASE("file importing") {
+    const char* lines1[] = {
+	"double = fn(n) {",
+	    "mul = 2;"
+	    "return mul*n;"
+	"}" };
+    size_t n_lines1 = sizeof(lines1)/sizeof(char*);
+    write_test_file(lines1, n_lines1, "/tmp/lines1.spcl");
+    const char* lines2[] = {
+	"import /tmp/lines1.spcl",
+	"a1 = double(1)",
+	"a2 = double(2)",
+	"a3 = double(3)" };
+    size_t n_lines2 = sizeof(lines2)/sizeof(char*);
+    write_test_file(lines2, n_lines2, "/tmp/lines2.spcl");
+    spcl_val er;
+    spcl_inst* c = spcl_inst_from_file("/tmp/lines2.spcl", &er, 0, NULL);
+    int tmp;
+    CHECK(spcl_find_int(c, "a1", &tmp) >= 0);
+    CHECK(tmp == 2);
+    CHECK(spcl_find_int(c, "a2", &tmp) >= 0);
+    CHECK(tmp == 4);
+    CHECK(spcl_find_int(c, "a3", &tmp) >= 0);
+    CHECK(tmp == 6);
     destroy_spcl_inst(c);
 }
 

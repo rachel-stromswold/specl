@@ -136,6 +136,7 @@ int TYPED(STACK_PEEK,TYPE)(stack(TYPE)* s, size_t ind, TYPE* sto) {			\
  * Macro to set a value while automagically calculating the string length
  */
 #define spcl_set_val(INST, NAME, VAL, COPY) spcl_set_valn(INST, NAME, strlen(NAME), VAL, COPY)
+#define make_spcl_fstream(NAME) make_spcl_fstreamn(NAME, strlen(NAME))
 /**
  * provides a handy macro which wraps get_sigerr and aborts execution of a function if an invalid signature was detected
  * FN_CALL: the name of the function
@@ -194,8 +195,10 @@ typedef struct spcl_fstream {
 } spcl_fstream;
 /**
  * Return a new spcl_fstream
+ * p_fname: the filename to read
+ * n: the length of the filename in bytes.
  */
-spcl_fstream* make_spcl_fstream(const char* p_fname);
+spcl_fstream* make_spcl_fstreamn(const char* p_fname, size_t n);
 /**
  * Return a copy to the fstream pointed to by o
  */
@@ -457,7 +460,7 @@ void destroy_spcl_inst(spcl_inst* c);
 #if SPCL_DEBUG_LVL>0
 spcl_val do_op(struct spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end);
 read_state make_read_state(const spcl_fstream* fs, lbi s, lbi e);
-typedef enum { KEY_NONE, KEY_CLASS, KEY_IF, KEY_FOR, KEY_ELSE, KEY_WHILE, KEY_BREAK, KEY_CONT, KEY_RET, KEY_FN, SPCL_N_KEYS } spcl_key;
+typedef enum { KEY_NONE, KEY_IMPORT, KEY_CLASS, KEY_IF, KEY_FOR, KEY_ELSE, KEY_WHILE, KEY_BREAK, KEY_CONT, KEY_RET, KEY_FN, SPCL_N_KEYS } spcl_key;
 spcl_key get_keyword(read_state* rs);
 spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind, lbi* new_end);
 #endif

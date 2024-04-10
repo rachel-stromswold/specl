@@ -5,9 +5,9 @@
 #define mkarr(a, t, n)  (t *)xrealloc(a, sizeof(t)*n)
 
 #if SPCL_DEBUG_LVL==0
-typedef enum { KEY_NONE, KEY_CLASS, KEY_IF, KEY_FOR, KEY_ELSE, KEY_WHILE, KEY_BREAK, KEY_CONT, KEY_RET, KEY_FN, SPCL_N_KEYS } spcl_key;
+typedef enum { KEY_NONE, KEY_IMPORT, KEY_CLASS, KEY_IF, KEY_FOR, KEY_ELSE, KEY_WHILE, KEY_BREAK, KEY_CONT, KEY_RET, KEY_FN, SPCL_N_KEYS } spcl_key;
 #endif
-static const char* spcl_keywords[SPCL_N_KEYS] = {"", "class", "if", "for", "else", "while", "break", "continue", "return", "fn"};
+static const char* spcl_keywords[SPCL_N_KEYS] = {"", "import", "class", "if", "for", "else", "while", "break", "continue", "return", "fn"};
 static const char* const errnames[N_ERRORS] =
 {"SUCCESS", "NO_FILE", "LACK_TOKENS", "BAD_SYNTAX", "BAD_VALUE", "BAD_TYPE", "NOMEM", "NAN", "UNDEF", "OUT_OF_BOUNDS", "ASSERT"};
 static const char* const valnames[N_VALTYPES] = {"undefined", "error", "numeric", "string", "array", "list", "function", "object"};
@@ -398,16 +398,22 @@ static inline spcl_fstream* alloc_fstream() {
     fs->n_lines = 0;
     return fs;
 }
-spcl_fstream* make_spcl_fstream(const char* p_fname) {
+spcl_fstream* make_spcl_fstreamn(const char* p_fname, size_t n) {
     if (!p_fname)
 	return alloc_fstream();
-    spcl_fstream* fs = alloc_fstream();
-    size_t buf_size = LINE_SIZE;
-    fs->lines = xmalloc(sizeof(char*)*buf_size);
-    fs->line_sizes = xmalloc(sizeof(size_t)*buf_size);
-    fs->n_lines = 0;
-    FILE* fp = fopen(p_fname, "r");
+
+    //this is so fucking dumb, i hate null-terminated strings
+    char* tmp_fname = strndup(p_fname, n);
+    FILE* fp = fopen(tmp_fname, "r");
+    free(tmp_fname);
     if (fp) {
+	//allocate memory for the stream and initialize to be empty
+	spcl_fstream* fs = alloc_fstream();
+	size_t buf_size = LINE_SIZE;
+	fs->lines = xmalloc(sizeof(char*)*buf_size);
+	fs->line_sizes = xmalloc(sizeof(size_t)*buf_size);
+	fs->n_lines = 0;
+	//start reading
         size_t line_len = 0;
         int go_again = 1;
         do {
@@ -448,12 +454,10 @@ spcl_fstream* make_spcl_fstream(const char* p_fname) {
         fs->lines = xrealloc(fs->lines, sizeof(char*) * fs->n_lines);
         fs->line_sizes = xrealloc(fs->line_sizes, sizeof(size_t) * fs->n_lines);
         fclose(fp);
-    } else {
-        printf("Error: couldn't open file %s for reading!\n", p_fname);
-        free(fs->lines);
-        fs->lines = NULL;
+	return fs;
     }
-    return fs;
+    fprintf(stderr, "Error: couldn't open file %s for reading!\n", p_fname);
+    return NULL;
 }
 spcl_fstream* copy_spcl_fstream(const spcl_fstream* o) {
     spcl_fstream* fs = alloc_fstream();
@@ -513,6 +517,7 @@ char* fs_get_line(const spcl_fstream* fs, lbi b, lbi e, size_t* n) {
 static inline
 #endif
 spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, lbi start, lbi end) {
+    //TODO: there seems to be a bug where multiple lines get folded in one. figure out why this happens.
     spcl_fstream* ret = alloc_fstream();
     if (lbicmp(start, end) >= 0) {
 	ret->n_lines = 0;
@@ -2463,6 +2468,14 @@ static inline spcl_val spcl_parse_line_rs(struct spcl_inst* c, read_state rs, lb
 	//hack to signal that we want to jump down the callstack
 	*new_end = make_lbi(SIZE_MAX, SIZE_MAX);
 	return sto;
+    } else if (start_key == KEY_IMPORT) {
+	while (is_whitespace(fs_get(rs.b, rs.start)))
+	    rs.start = fs_add(rs.b, rs.start, 1);
+	spcl_fstream* fs = make_spcl_fstreamn(fs_read(rs.b, rs.start), fs_diff(rs.b, rs.end, rs.start));
+	if (!fs)
+	    return spcl_make_err(E_BAD_VALUE, "couldn't open file %s", fs_read(rs.b, rs.start));
+	sto = spcl_read_lines(c, fs);
+	return sto;
     }
 
     //store locations of the first instance of different operators. We do this so we can quickly look up new operators if we didn't find any other operators of a lower precedence (such operators are placed in the tree first).
@@ -2698,7 +2711,10 @@ spcl_inst* spcl_inst_from_file(const char* fname, spcl_val* error, int argc, cha
     }
     //read the rest of the file
     spcl_fstream* fs = make_spcl_fstream(fname);
-    er = spcl_read_lines(ret, fs);
+    if (fs)
+	er = spcl_read_lines(ret, fs);
+    else
+	er = spcl_make_err(E_BAD_VALUE, "couldn't open file %s", fname);
     if (error)
 	*error = er;
     destroy_spcl_fstream(fs);
