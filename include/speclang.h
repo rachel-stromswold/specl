@@ -42,7 +42,7 @@ typedef unsigned int _uint;
 typedef unsigned char _uint8;
 
 typedef enum { E_SUCCESS, E_NOFILE, E_LACK_TOKENS, E_BAD_SYNTAX, E_BAD_VALUE, E_BAD_TYPE, E_NOMEM, E_NAN, E_UNDEF, E_OUT_OF_RANGE, E_ASSERT, N_ERRORS } parse_ercode;
-typedef enum {VAL_UNDEF, VAL_ERR, VAL_NUM, VAL_STR, VAL_ARRAY, VAL_MAT, VAL_LIST, VAL_FUNC, VAL_INST, N_VALTYPES} valtype;
+typedef enum {VAL_UNDEF, VAL_ERR, VAL_NUM, VAL_STR, VAL_ARRAY, VAL_MAT, VAL_LIST, VAL_FN, VAL_INST, N_VALTYPES} valtype;
 //helper classes and things
 typedef enum {BLK_UNDEF, BLK_MISC, BLK_INVERT, BLK_TRANSFORM, BLK_DATA, BLK_ROOT, BLK_COMPOSITE, BLK_FUNC_DEC, BLK_LITERAL, BLK_COMMENT, BLK_SQUARE, BLK_QUOTE, BLK_QUOTE_SING, BLK_PAREN, BLK_CURLY, N_BLK_TYPES} blk_type;
 
@@ -132,27 +132,6 @@ int TYPED(STACK_PEEK,TYPE)(stack(TYPE)* s, size_t ind, TYPE* sto) {			\
  */
 #define peek(TYPE) TYPED(STACK_PEEK,TYPE)
 
-/**
- * Wrap a mathematical function that takes a single floating point argument
- * FN: the function to wrap
- */
-#define WRAP_MATH_FN(FN) spcl_val TYPED(spcl,FN)(struct spcl_inst* c, spcl_fn_call f) {	\
-    spcl_val sto = get_sigerr(f, SIGLEN(NUM1_SIG), SIGLEN(NUM1_SIG), NUM1_SIG);		\
-    if (sto.type == 0)									\
-	return spcl_make_num( FN(f.args[0].val.x) );					\
-    cleanup_spcl_val(&sto);								\
-    sto = get_sigerr(f, SIGLEN(ARR1_SIG), SIGLEN(ARR1_SIG), ARR1_SIG);			\
-    if (sto.type == 0) {								\
-	sto.type = VAL_ARRAY;								\
-	sto.n_els = f.args[0].n_els;							\
-	sto.val.a = malloc(sizeof(double)*sto.n_els);					\
-	if (!sto.val.a)									\
-	    return spcl_make_err(E_NOMEM, "");						\
-	for (size_t i = 0; i < f.args[0].n_els; ++i)					\
-	    sto.val.a[i] = FN(f.args[0].val.a[i]);					\
-    }											\
-    return sto;										\
-}
 /**
  * Macro to set a value while automagically calculating the string length
  */
@@ -303,7 +282,7 @@ spcl_val spcl_make_num(double x);
 /**
  * create a spcl_val from a string
  */
-spcl_val spcl_make_str(const char* s);
+spcl_val spcl_make_str(const char* s, size_t n);
 /**
  * create a spcl_val from a c array of doubles
  */
@@ -384,13 +363,21 @@ void val_sub(spcl_val* l, spcl_val r);
  */
 void val_mul(spcl_val* l, spcl_val r);
 /**
- * Add two spcl_vals together, overwriting the result to l
+ * compute l/r
  * num/num: arithmetic
  * array/array: piecewise division
  * array/num: divide each element by a number
  * mat/mat: piecewise matrix multiplication
  */
 void val_div(spcl_val* l, spcl_val r);
+/**
+ * compute the remainder of l/r
+ * num/num: arithmetic
+ * array/array: piecewise division
+ * array/num: divide each element by a number
+ * mat/mat: piecewise matrix multiplication
+ */
+void val_mod(spcl_val* l, spcl_val r);
 /**
  * raise l^r
  * num/num: arithmetic
@@ -415,7 +402,7 @@ void cleanup_name_val_pair(name_val_pair nv);
 
 //TODO: refactor spcl_fn_call to accept lbi's instead of names
 typedef struct spcl_fn_call {
-    char* name;
+    const char* name;
     spcl_val args[SPCL_ARGS_BSIZE];
     size_t n_args;
 } spcl_fn_call;
@@ -468,8 +455,10 @@ void destroy_spcl_inst(spcl_inst* c);
  * Execute the mathematical operation in the string str at the location op_ind
  */
 #if SPCL_DEBUG_LVL>0
-spcl_val do_op(struct spcl_inst* c, read_state rs, lbi op_loc);
+spcl_val do_op(struct spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end);
 read_state make_read_state(const spcl_fstream* fs, lbi s, lbi e);
+typedef enum { KEY_NONE, KEY_CLASS, KEY_IF, KEY_FOR, KEY_ELSE, KEY_WHILE, KEY_BREAK, KEY_CONT, KEY_RET, KEY_FN, SPCL_N_KEYS } spcl_key;
+spcl_key get_keyword(read_state* rs);
 spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind, lbi* new_end);
 #endif
 /**
@@ -571,6 +560,7 @@ typedef struct spcl_uf {
     spcl_fn_call call_sig;
     spcl_fstream* code_lines;
     spcl_val (*exec)(spcl_inst*, spcl_fn_call);
+    spcl_inst* fn_scope;
 } spcl_uf;
 
 /**
@@ -580,7 +570,7 @@ typedef struct spcl_uf {
  * n: the number of characters currently in the buffer
  * fp: the file pointer to read from
  */
-spcl_uf* make_spcl_uf_lb(spcl_fn_call sig, spcl_fstream* b);
+spcl_uf* make_spcl_uf_fs(spcl_fn_call sig, spcl_fstream* b);
 /**
  * constructor
  * sig: this specifies the signature of the function used when calling it
