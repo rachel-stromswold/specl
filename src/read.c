@@ -1815,15 +1815,16 @@ void destroy_spcl_inst(struct spcl_inst* c) {
     free(c->table);
     free(c);
 }
-#define MAX_OP 128
-static const int OP1_PRECS[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 3, 4, 0, 4, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 7, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-static const int OP2_PRECS[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 6, 0, 0, 0, 7, 7, 0, 7, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0};
+#define MAX_ASCII 0x7f
+#define MAX_OP_PREC  7
+static const int OP1_PRECS[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 3, 0, 0, 0, 0, 3, 4, 0, 4, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 5, 7, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+static const int OP2_PRECS[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 7, 7, 0, 7, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0};
 /**
  * Find the length of an operator sequence e.g. '==', '=', '+=' etc.
  */
 static inline int get_oplen(char op, char next) {
     //return 0 if the character isn't an operator
-    if (op < 0 || op >= MAX_OP || (OP1_PRECS[op] == 0 && OP2_PRECS[op] == 0))
+    if (op < 0 || op > MAX_ASCII || (OP1_PRECS[op] == 0 && OP2_PRECS[op] == 0))
 	return 0;
     //matches characters '!', '?', '+', '-', '*', '/', '<', '=', '>', '.', and ','. hopefully those last two don't cause problems
     if ( op == '!' || op == '?' || op == '^' || (op >= '*' && op <= '/') || (op >= '<' && op <= '>') ) {
@@ -1942,7 +1943,7 @@ spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind
 		    continue;
 		*op_loc = rs.start;
 		op_prec = OP1_PRECS[cur];
-	    } else if (cur == ';' || cur == '\n' || cur == '#') {
+	    } else if (!cur || cur == ';' || cur == '\n' || cur == '#') {
 		break;
 	    }
 	}
@@ -2080,17 +2081,17 @@ spcl_val do_op(spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end) {
 	//0 branch
 	if (l.type == VAL_UNDEF || l.val.x == 0) {
 	    rs_r.start = fs_add(rs.b, col_loc, 1);
-	    sto = spcl_parse_line_rs(c, rs_r, NULL);
+	    sto = spcl_parse_line_rs(c, rs_r, new_end);
 	    return sto;
 	} else {
 	    //1 branch
 	    rs_r.end = col_loc;
-	    sto = spcl_parse_line_rs(c, rs_r, NULL);
+	    sto = spcl_parse_line_rs(c, rs_r, new_end);
 	    return sto;
 	}
     } else if (op == '=' && op_width == 1) {
 	//assignments
-	spcl_val tmp_val = spcl_parse_line_rs(c, rs_r, NULL);
+	spcl_val tmp_val = spcl_parse_line_rs(c, rs_r, new_end);
 	if (tmp_val.type == VAL_ERR)
 	    return tmp_val;
 	set_spcl_val_rs(c, rs_l, tmp_val);
@@ -2100,7 +2101,7 @@ spcl_val do_op(spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end) {
     spcl_val l = spcl_parse_line_rs(c, rs_l, NULL);
     if (l.type == VAL_ERR)
 	return l;
-    spcl_val r = spcl_parse_line_rs(c, rs_r, NULL);
+    spcl_val r = spcl_parse_line_rs(c, rs_r, new_end);
     if (r.type == VAL_ERR) {
 	cleanup_spcl_val(&l);
 	return r;
@@ -2146,6 +2147,7 @@ spcl_val do_op(spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end) {
 	case '%': val_mod(&l, r);break;
 	case '^': val_exp(&l, r);break;
 	case '!': l = (r.type == VAL_UNDEF || r.val.x == 0)? spcl_make_num(1) : spcl_make_num(0);break;
+	default: cleanup_spcl_val(&l);return spcl_make_err(E_BAD_SYNTAX, "unexpected %c", op);break;
 	}
 	//if this is a relative assignment, do that
 	if (next == '=') {
@@ -2340,7 +2342,7 @@ static inline spcl_val inds_to_nvp(spcl_inst* c, const spcl_fstream* fs, name_va
     *n = j;
     return spcl_make_none();
 }
-
+static inline spcl_uf* make_spcl_uf_rs(read_state rs, lbi* arg_inds, size_t n_args, lbi* new_end, spcl_val* er);
 //parse function definition/call statements
 static inline spcl_val parse_literal_fn(struct spcl_inst* c, spcl_key key, read_state rs, lbi open_ind, lbi close_ind, lbi* new_end) {
     //check if this is a parenthetical expression
@@ -2366,35 +2368,12 @@ static inline spcl_val parse_literal_fn(struct spcl_inst* c, spcl_key key, read_
     f.name = fs_read(rs.b, s);
     //check if this is a declaration
     if (key == KEY_FN) {
-	//TODO: handle function declarations
+	//parse the function and check for errors
+	sto.val.f = make_spcl_uf_rs(rs, arg_inds, f.n_args, new_end, &sto);
+	free(arg_inds);
+	if (sto.type == VAL_ERR)
+	    return sto;
 	sto.type = VAL_FN;
-	sto.n_els = f.n_args;
-	//we setup arg_inds such that consecutive indices give strings to read
-	for (size_t i = 0; i < f.n_args && i+1 < SPCL_ARGS_BSIZE; ++i) {
-	    lbi this_start = fs_add(rs.b, arg_inds[i], 1);
-	    //we have to fast forward until we're on the same line so that we can safely use fs_read
-	    while (this_start.line != arg_inds[i+1].line)
-		this_start = fs_add(rs.b, this_start, 1);
-	    f.args[i] = spcl_make_str(fs_read(rs.b, this_start), arg_inds[i+1].off - this_start.off);
-	}
-	//now we have to fetch the contents (between the open and close {})
-	lbi op_loc, tmp;
-	if (!new_end) new_end = &tmp;
-	spcl_val er = find_operator(make_read_state(rs.b, fs_add(rs.b, arg_inds[f.n_args], 1), fs_end(rs.b)), &op_loc, &open_ind, &close_ind, new_end);
-	//check for errors
-	if (er.type == VAL_ERR) {
-	    cleanup_spcl_fn_call(&f);
-	    free(arg_inds);
-	    return er;
-	}
-	if (lbicmp(op_loc, *new_end) < 0) {
-	    cleanup_spcl_fn_call(&f);
-	    free(arg_inds);
-	    return spcl_make_err(E_BAD_SYNTAX, "unexpected %c", fs_get(rs.b, op_loc));
-	}
-	//create the function
-	sto.type = VAL_FN;
-	sto.val.f = make_spcl_uf_fs(f, fs_get_enclosed(rs.b, fs_add(rs.b, op_loc, 1), close_ind));
 	sto.n_els = f.n_args;
 	return sto;
     } else {
@@ -2495,7 +2474,7 @@ static inline spcl_val spcl_parse_line_rs(struct spcl_inst* c, read_state rs, lb
 
     //if the first non-whitespace character after a keyword is a letter, then interpret as a variable name.
     char thisc = fs_get(rs.b, rs.start);
-    int is_var = ( (thisc >= 'A' && thisc <= 'Z') || (thisc >= 'a' && thisc <= 'z') );
+    int is_var = (thisc > MAX_ASCII || (thisc >= 'A' && thisc <= 'Z') || (thisc >= 'a' && thisc <= 'z'));
 
     //last try removing parenthesis 
     if (lbicmp(op_loc, rs.end) >= 0) {
@@ -2728,13 +2707,54 @@ spcl_inst* spcl_inst_from_file(const char* fname, spcl_val* error, int argc, cha
 
 /** ============================ spcl_uf ============================ **/
 
-spcl_uf* make_spcl_uf_fs(spcl_fn_call sig, spcl_fstream* b) {
+/**
+ * create a new user function using a read state rs and a set of arguments
+ * rs: the read state of the start of the function declaration
+ * arg_inds: indices for each argument
+ * n_args: the number of arguments. Note that arg_inds must have one more value allocated than n_args so that it can store the termination points for each string
+ * new_end: we must track the final location so that the caller fast-forwards to the end of the declaration
+ * er: optionally save an error 
+ */
+static inline spcl_uf* make_spcl_uf_rs(read_state rs, lbi* arg_inds, size_t n_args, lbi* new_end, spcl_val* er) {
+    //ensure that we can store the end location
+    if (!new_end) {
+	if (er) *er = spcl_make_err(E_BAD_SYNTAX, "declared function without room to grow");
+	return NULL;
+    }
+    //fast forward to the open curly brace
+    lbi args_end = fs_add(rs.b, arg_inds[n_args], 1);
+    while (is_whitespace(fs_get(rs.b, args_end)))
+	args_end = fs_add(rs.b, args_end, 1);
+    if (fs_get(rs.b, args_end) != '{') {
+	if (er) *er = spcl_make_err(E_BAD_SYNTAX, "unexpected %c", fs_get(rs.b, args_end));//}
+	return NULL;
+    }//}
+    lbi op_loc, open_ind, close_ind;
+    spcl_val sto = find_operator(make_read_state(rs.b, args_end, fs_end(rs.b)), &op_loc, &open_ind, &close_ind, new_end);
+    //let errors fall through
+    if (sto.type == VAL_ERR) {
+	if (er) *er = sto;
+	return NULL;
+    }
+    //if we got here, then we can proceed without errors
     spcl_uf* uf = xmalloc(sizeof(spcl_uf));
-    uf->code_lines = b;
-    uf->call_sig = sig;
+    //setup the call signature
+    uf->call_sig.name = NULL;
+    uf->call_sig.n_args = n_args;
+    //copy function argument names
+    for (size_t i = 0; i < n_args && i+1 < SPCL_ARGS_BSIZE; ++i) {
+	lbi this_start = fs_add(rs.b, arg_inds[i], 1);
+	//we have to fast forward until we're on the same line so that we can safely use fs_read
+	while (this_start.line != arg_inds[i+1].line)
+	    this_start = fs_add(rs.b, this_start, 1);
+	size_t this_n = arg_inds[i+1].off - this_start.off;
+	uf->call_sig.args[i] = spcl_make_str(fs_read(rs.b, this_start), this_n+1);
+	uf->call_sig.args[i].val.s[this_n] = 0;//null terminate just in case
+    }
+    uf->code_lines = fs_get_enclosed(rs.b, fs_add(rs.b, open_ind, 1), close_ind);
     uf->exec = NULL;
     //we change the parent in spcl_uf_eval, so we just set NULL to be a dummy
-    uf->fn_scope = make_spcl_inst(NULL);
+    uf->fn_scope = make_spcl_inst(0x01);
     return uf;
 }
 spcl_uf* make_spcl_uf_ex(spcl_val (*p_exec)(spcl_inst*, spcl_fn_call)) {
@@ -2769,7 +2789,7 @@ typedef enum {TOK_NONE, TOK_IF, TOK_FOR, TOK_WHILE, TOK_RETURN, N_TOKS} token_ty
 spcl_val spcl_uf_eval(spcl_uf* uf, spcl_inst* c, spcl_fn_call call) {
     if (uf->exec) {
 	return (*uf->exec)(c, call);
-    } else if (uf->call_sig.name && uf->call_sig.n_args > 0) {
+    } else if (uf->code_lines) {
 	//TODO: handle script functions
 	if (call.n_args != uf->call_sig.n_args)
 	    return spcl_make_err(E_LACK_TOKENS, "%s() expected %lu arguments, got %lu", uf->call_sig.name, call.n_args, uf->call_sig.name);

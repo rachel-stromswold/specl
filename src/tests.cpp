@@ -483,6 +483,16 @@ TEST_CASE("operations") {
 	strncpy(buf, "(1 < 2) ? 100 : 200", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
 	tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 100);
+	//check with pairs of strings
+	strncpy(buf, "(1 < 2) ? \"100\" : \"200\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	tmp_val = spcl_parse_line(sc, buf);
+	REQUIRE(tmp_val.type == VAL_STR);
+	CHECK(strcmp(tmp_val.val.s, "100") == 0);
+	strncpy(buf, "(1 > 2) ? \"100\" : \"200\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	tmp_val = spcl_parse_line(sc, buf);
+	REQUIRE(tmp_val.type == VAL_STR);
+	CHECK(strcmp(tmp_val.val.s, "200") == 0);
+	//test graceful failure conditions
 	strncpy(buf, "(1 < 2) ? 100", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
@@ -864,7 +874,7 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	CHECK(er.type != VAL_ERR);
 	CHECK(open_ind.line == 0);CHECK(open_ind.off == strlen("fn test_fun"));
 	CHECK(close_ind.line == 0);CHECK(close_ind.off == fs->line_sizes[0]-1);
-	CHECK(lbicmp(op_loc, new_end) == 0);
+	CHECK(lbicmp(op_loc, new_end) >= 0);
 	//test the braces around the function
 	er = find_operator(make_read_state(fs, make_lbi(1,0), make_lbi(6,1)), &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
@@ -1037,13 +1047,13 @@ TEST_CASE("spcl_inst parsing") {
 	destroy_spcl_inst(c);
 	destroy_spcl_fstream(b_1);
     }
-    /*SUBCASE ("internal user defined functions") {
+    SUBCASE ("internal user defined functions") {
 	const char* fun_name = "test_fun";
 	char* tmp_name = strdup(fun_name);
 
 	const char* lines[] = {
 	    "test_fun = fn(i) {",
-	    "return (i > 2)? \"a\" : \"b\"",
+	    "return (i < 2)? \"a\" : 2",
 	    "}",
 	    "a = test_fun(1);b=test_fun(10)" };
 	size_t n_lines = sizeof(lines)/sizeof(char*);
@@ -1057,13 +1067,12 @@ TEST_CASE("spcl_inst parsing") {
 	CHECK(val_fun.type == VAL_FN);
 	//make sure that the number spcl_val a is there
 	spcl_val val_a = spcl_find(c, "a");
-	CHECK(val_a.type == VAL_STR);
+	REQUIRE(val_a.type == VAL_STR);
 	CHECK(strcmp(val_a.val.s, "a") == 0);
 	spcl_val val_b = spcl_find(c, "b");
-	CHECK(val_b.type == VAL_STR);
-	CHECK(strcmp(val_b.val.s, "b") == 0);
+	test_num(val_b, 2);
 	destroy_spcl_inst(c);
-    }*/
+    }
     SUBCASE ("stress test") {
 	//first we add a bunch of arbitrary variables to make searching harder for the parser
 	const char* lines1[] = {

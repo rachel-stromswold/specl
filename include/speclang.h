@@ -570,14 +570,6 @@ typedef struct spcl_uf {
  * n: the number of characters currently in the buffer
  * fp: the file pointer to read from
  */
-spcl_uf* make_spcl_uf_fs(spcl_fn_call sig, spcl_fstream* b);
-/**
- * constructor
- * sig: this specifies the signature of the function used when calling it
- * bufptr: a buffer to be used for line reading
- * n: the number of characters currently in the buffer
- * fp: the file pointer to read from
- */
 spcl_uf* make_spcl_uf_ex(spcl_val (*p_exec)(spcl_inst*, spcl_fn_call));
 /**
  * create a deep copy of the user_func o and return it. The result must be destroyed using cleanup_user_func.
