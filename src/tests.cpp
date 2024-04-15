@@ -901,6 +901,43 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	destroy_spcl_fstream(b_fun_con);
 	destroy_spcl_fstream(fs);
     }
+    SUBCASE("open brace on the same line") {
+	const char* lines[] = { "fn test_fun(a)", "{", "if a > 5 {return 1}", "return 0", "}" };
+	size_t n_lines = sizeof(lines)/sizeof(char*);
+	write_test_file(lines, n_lines, TEST_FNAME);
+	//check the lines (curly brace on new line)
+	spcl_fstream* fs = make_spcl_fstream(TEST_FNAME);
+	for (size_t i = 0; i < n_lines; ++i) {
+	    strval = fetch_fs_line(fs, i, 0);
+	    CHECK(strcmp(lines[i], strval) == 0);
+	    free(strval);
+	}
+	//find the block that says fn
+	read_state rs = make_read_state(fs, make_lbi(0,0), make_lbi(1,0));
+	spcl_key tkey = get_keyword(&rs);
+	CHECK(tkey == KEY_FN);
+	CHECK(rs.start.line == 0);
+	CHECK(rs.start.off == 2);
+	//find the parenthesis
+	lbi op_loc, open_ind, close_ind, new_end;
+	spcl_val er = find_operator(rs, &op_loc, &open_ind, &close_ind, &new_end);
+	CHECK(er.type != VAL_ERR);
+	CHECK(open_ind.line == 0);CHECK(open_ind.off == strlen("fn test_fun"));
+	CHECK(close_ind.line == 0);CHECK(close_ind.off == fs->line_sizes[0]-1);
+	CHECK(lbicmp(op_loc, new_end) >= 0);
+	//check the braces around the if statement
+	er = find_operator(make_read_state(fs, make_lbi(2,0), make_lbi(3,0)), &op_loc, &open_ind, &close_ind, &new_end);
+	CHECK(er.type != VAL_ERR);
+	CHECK(open_ind.line == 2);CHECK(open_ind.off == strlen("if a > 5 "));
+	CHECK(close_ind.line == 2);CHECK(close_ind.off == 18);
+	//move to the next character after the open brace and get the contents
+	open_ind.off += 1;
+	spcl_fstream* b_if_con = fs_get_enclosed(fs, open_ind, close_ind);
+	CHECK(b_if_con->n_lines == 1);
+	CHECK(strcmp(b_if_con->lines[0], "return 1\n") == 0);
+	destroy_spcl_fstream(b_if_con);
+	destroy_spcl_fstream(fs);
+    }
 }
 #endif
 
@@ -1055,7 +1092,11 @@ TEST_CASE("spcl_inst parsing") {
 	    "test_fun = fn(i) {",
 	    "return (i < 2)? \"a\" : \"b\"",
 	    "}",
-	    "a = test_fun(1);b=test_fun(10)" };
+	    "inst_fn = fn(n) {",
+	    "return {__type__ = \"test_inst\";num = n}",
+	    "}",
+	    "a = test_fun(1);",
+	    "b=test_fun(10);c=inst_fn(2)" };
 	size_t n_lines = sizeof(lines)/sizeof(char*);
 	write_test_file(lines, n_lines, TEST_FNAME);
 	//read the file and check for errors
@@ -1070,8 +1111,17 @@ TEST_CASE("spcl_inst parsing") {
 	REQUIRE(val_a.type == VAL_STR);
 	CHECK(strcmp(val_a.val.s, "a") == 0);
 	spcl_val val_b = spcl_find(c, "b");
-	REQUIRE(val_a.type == VAL_STR);
-	CHECK(strcmp(val_a.val.s, "b") == 0);
+	REQUIRE(val_b.type == VAL_STR);
+	CHECK(strcmp(val_b.val.s, "b") == 0);
+	//look at the returned instance
+	spcl_val val_c = spcl_find(c, "c");
+	REQUIRE(val_c.type == VAL_INST);
+	spcl_inst* sub_c = val_c.val.c;
+	val_c = spcl_find(sub_c, "num");
+	test_num(val_c, 2);
+	val_c = spcl_find(sub_c, "__type__");
+	REQUIRE(val_c.type == VAL_STR);
+	CHECK(strcmp(val_c.val.s,"test_inst") == 0);
 	destroy_spcl_inst(c);
     }
     SUBCASE ("stress test") {

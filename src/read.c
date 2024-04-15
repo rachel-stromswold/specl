@@ -432,15 +432,15 @@ spcl_fstream* make_spcl_fstreamn(const char* p_fname, size_t n) {
                     this_size *= 2;
                     this_buf = xrealloc(this_buf, sizeof(char)*this_size);
                 }
-                if ((char)res == ';' || (char)res == '\n') {
-                    this_buf[line_len] = 0;
+                this_buf[line_len] = (char)res;
+                if ((char)res == '\n') {
+                    //this_buf[line_len] = 0;
                     break;
                 } else if (res == EOF) {
 		    this_buf[line_len] = 0;
 		    go_again = 0;
 		    break;
-		}	
-                this_buf[line_len] = (char)res;
+		}
                 res = fgetc(fp);
             }
             if (line_len > 0) {
@@ -519,15 +519,28 @@ static inline
 spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, lbi start, lbi end) {
     //TODO: there seems to be a bug where multiple lines get folded in one. figure out why this happens.
     spcl_fstream* ret = alloc_fstream();
-    if (lbicmp(start, end) >= 0) {
+    if (!fs || fs->n_lines == 0 || lbicmp(start, end) >= 0) {
 	ret->n_lines = 0;
 	ret->lines = NULL;
 	ret->line_sizes = NULL;
 	return ret;
     }
+    //figure out the number of lines and bound it to fs
     ret->n_lines = end.line - start.line + 1;
+    if (start.line + ret->n_lines > fs->n_lines)
+	ret->n_lines = fs->n_lines - start.line;
+    //allocate memory
     ret->lines = xmalloc(sizeof(char*)*ret->n_lines);
     ret->line_sizes = xmalloc(sizeof(size_t)*ret->n_lines);
+
+    //handle a special case where there's only one line
+    if (start.line == end.line)	{
+	ret->n_lines = 1;
+	ret->line_sizes[0] = end.off - start.off + 1;
+	ret->lines[0] = strndup(fs->lines[start.line]+start.off, ret->line_sizes[0]);
+	ret->lines[0][end.off-start.off] = '\n';
+	return ret;
+    }
     //the first line will be smaller
     ret->line_sizes[0] = fs->line_sizes[start.line] - start.off;
     ret->lines[0] = strndup(fs->lines[start.line]+start.off, ret->line_sizes[0]);
@@ -1841,7 +1854,7 @@ static inline int get_oplen(char op, char next) {
 	    return 2;
 	return 1;
     }
-    return 0;
+    return op == ':';
 }
 
 #if SPCL_DEBUG_LVL==0
@@ -2438,7 +2451,12 @@ static inline spcl_val parse_literal_table(struct spcl_inst* c, read_state rs, l
     //create a new context and start reading
     spcl_val ret = spcl_make_inst(c, NULL);
     spcl_fstream* sub_fs = fs_get_enclosed(rs.b, fs_add(rs.b, open_ind, 1), close_ind);
-    spcl_read_lines(ret.val.c, sub_fs);
+    spcl_val er = spcl_read_lines(ret.val.c, sub_fs);
+    //handle errors
+    if (er.type == VAL_ERR) {
+	cleanup_spcl_val(&ret);
+	ret = er;
+    }
     destroy_spcl_fstream(sub_fs);
     return ret;
 }
@@ -2485,9 +2503,9 @@ static inline spcl_val spcl_parse_line_rs(struct spcl_inst* c, read_state rs, lb
     if (sto.type == VAL_ERR)
 	return sto;
 
-    //if the first non-whitespace character after a keyword is a letter, then interpret as a variable name.
+    //if the first non-whitespace character after a keyword is a letter, then interpret as a variable name. Note that _ through z includes all lowercase letters, _, and `. The backtick is kind of weird but i'm not using it for anything else...
     char thisc = fs_get(rs.b, rs.start);
-    int is_var = (thisc > MAX_ASCII || (thisc >= 'A' && thisc <= 'Z') || (thisc >= 'a' && thisc <= 'z'));
+    int is_var = (thisc > MAX_ASCII || (thisc >= 'A' && thisc <= 'Z') || (thisc >= '_' && thisc <= 'z'));
 
     //last try removing parenthesis 
     if (lbicmp(op_loc, rs.end) >= 0) {
@@ -2800,8 +2818,6 @@ void destroy_spcl_uf(spcl_uf* uf) {
 	destroy_spcl_inst(uf->fn_scope);
     free(uf);
 }
-/*const char* token_names[] = {"if", "for", "while", "return"};
-typedef enum {TOK_NONE, TOK_IF, TOK_FOR, TOK_WHILE, TOK_RETURN, N_TOKS} token_type;*/
 spcl_val spcl_uf_eval(spcl_uf* uf, spcl_inst* c, spcl_fn_call call) {
     if (uf->exec) {
 	return (*uf->exec)(c, call);
