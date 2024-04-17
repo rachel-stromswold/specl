@@ -1,8 +1,5 @@
+#include "utils.h"
 #include "speclang.h"
-
-#define countof(a)    (size_t)(sizeof(a) / sizeof(*(a)))
-#define lengthof(s)   (countof(s) - 1)
-#define mkarr(a, t, n)  (t *)xrealloc(a, sizeof(t)*n)
 
 #if SPCL_DEBUG_LVL==0
 typedef enum { KEY_NONE, KEY_IMPORT, KEY_CLASS, KEY_IF, KEY_FOR, KEY_ELSE, KEY_WHILE, KEY_BREAK, KEY_CONT, KEY_RET, KEY_FN, SPCL_N_KEYS } spcl_key;
@@ -11,10 +8,6 @@ static const char* spcl_keywords[SPCL_N_KEYS] = {"", "import", "class", "if", "f
 static const char* const errnames[N_ERRORS] =
 {"SUCCESS", "NO_FILE", "LACK_TOKENS", "BAD_SYNTAX", "BAD_VALUE", "BAD_TYPE", "NOMEM", "NAN", "UNDEF", "OUT_OF_BOUNDS", "ASSERT"};
 static const char* const valnames[N_VALTYPES] = {"none", "error", "numeric", "string", "array", "list", "fn", "obj"};
-
-STACK_DEF(blk_type)
-STACK_DEF(size_t)
-STACK_DEF(char)
 
 //These functions work like malloc and realloc, but abort execution if allocation failed.
 static inline void* xmalloc(size_t n) {
@@ -123,65 +116,6 @@ static inline size_t con_it_next(const spcl_inst* c, size_t i) {
 }
 
 /**
- * check if a character is whitespace
- */
-static inline int is_whitespace(char c) {
-    if (c == 0 || c == ' ' || c == '\t' || c == '\n' || c == '\r')
-	return 1;
-    return 0;
-}
-
-/**
- * Helper function for token_block which tests whether the character c is a token terminator
- */
-static inline unsigned char is_char_sep(char c) {
-    if (is_whitespace(c) || c == ';' || c == '+'  || c == '-' || c == '*'  || c == '/' || c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}')
-	return 1;
-    return 0;
-}
-
-int namecmp(const char* a, const char* b, size_t n) {
-    size_t i = 0;size_t j = 0;
-    while (i < n && is_char_sep(a[i]))
-	++i;
-    while (j < n && is_char_sep(b[j]))
-	++j;
-    unsigned char hit_end = 0;// hit_end&1 did a hit a whitespace block? hit_end&2 did b hit a whitespace block?
-    while (i < n && j < n) {
-	hit_end = is_char_sep(a[i]) | (is_char_sep(b[j]) << 1);
-	//if both strings hit the end and we haven't already exited, that means there was a match
-	if (hit_end == 3)
-	    return 0;
-	//if only one string hit the end, then there wasn't a match
-	if (hit_end != 0)
-	    return 2*hit_end - 3;//since this case implies, hit_end == 1 or 2, this hack tells us whether a or b is larger
-	//if we haven't hit the end of either string and there's a mismatch, return the difference
-	if (hit_end == 0 && a[i] != b[j])
-	    return (int)(a[i] - b[j]);
-	++i;
-	++j;
-    }
-    hit_end = is_char_sep(a[i]) | (is_char_sep(b[j]) << 1);
-    if (hit_end == 3 || hit_end == 0)
-	return 0;
-    return 2*hit_end - 3;
-}
-
-//check wheter s and e are matching delimeters
-static inline char get_match(char s) {
-    switch (s) {
-	case '(': return ')';
-	case '[': return ']';
-	case '{': return '}';
-	case '*': return '*';
-	case '\"': return '\"';
-	case '\'': return '\'';
-	default: return 0;
-    }
-    return 0;
-}
-
-/**
  * Helper function that finds the start of first token before the index s in the read state rs. The returned spcl_val is greater than or equal to zero.
  * fs: the line buffer to read from
  * s: the current position
@@ -200,38 +134,12 @@ static inline lbi find_token_before(const spcl_fstream* fs, lbi s, lbi stop) {
     return stop;
 }
 
+STACK_DEF(char,BLK_MAX)
 /**
  * Find the index of the first character c that isn't nested inside a block or NULL if an error occurred
  */
-static inline char* strchr_block(char* str, char c) {
-    stack(char) blk_stk = make_stack(char)();
-    char prev;
-    for (size_t i = 0; str[i] != 0; ++i) {
-	if (str[i] == c && blk_stk.ptr == 0)
-	    return str+i;
-	if (str[i] == '(' || str[i] == '[' || str[i] == '{') {
-	    if ( push(char)(&blk_stk, str[i]) ) return NULL;
-	} else if (str[i] == '}' || str[i] == ']' ||str[i] == ')') {
-	    if ( pop(char)(&blk_stk, &prev) || str[i] != get_match(prev) ) return NULL;
-	} else if (str[i] == '\"') {
-	    if (blk_stk.ptr != 0 && !peek(char)(&blk_stk, 1, &prev) && prev == '\"') {
-		if ( pop(char)(&blk_stk, NULL) ) return NULL;
-	    } else {
-		if ( push(char)(&blk_stk, str[i]) ) return NULL;
-	    }
-	} else if (str[i] == '\'') {
-	    //quotes are more complicated
-	    if (blk_stk.ptr != 0 && !peek(char)(&blk_stk, 1, &prev) && prev == '\'') {
-		if ( pop(char)(&blk_stk, NULL) ) return NULL;
-	    } else {
-		if ( push(char)(&blk_stk, str[i]) ) return NULL;
-	    }
-	}
-    }
-    return NULL;
-}
 static inline lbi strchr_block_rs(const spcl_fstream* fs, lbi s, lbi e, char c) {
-    stack(char) blk_stk = make_stack(char)();
+    stack(char,BLK_MAX) blk_stk = make_stack(char,BLK_MAX)();
     char prev;
     char cur = 0;
     while (lbicmp(s, e)) {
@@ -243,21 +151,21 @@ static inline lbi strchr_block_rs(const spcl_fstream* fs, lbi s, lbi e, char c) 
 	if (cur == c && blk_stk.ptr == 0)
 	    return s;
 	if (cur == '(' || cur == '[' || cur == '{') {
-	    if ( push(char)(&blk_stk, cur) ) return e;
+	    if ( push(char,BLK_MAX)(&blk_stk, cur) ) return e;
 	} else if (cur == '}' || cur == ']' ||cur == ')') {
-	    if ( pop(char)(&blk_stk, &prev) || cur != get_match(prev) ) return e;
+	    if ( pop(char,BLK_MAX)(&blk_stk, &prev) || cur != get_match(prev) ) return e;
 	} else if (cur == '\"') {
-	    if (blk_stk.ptr != 0 && !peek(char)(&blk_stk, 1, &prev) && prev == '\"') {
-		if ( pop(char)(&blk_stk, NULL) ) return e;
+	    if (blk_stk.ptr != 0 && !peek(char,BLK_MAX)(&blk_stk, 1, &prev) && prev == '\"') {
+		if ( pop(char,BLK_MAX)(&blk_stk, NULL) ) return e;
 	    } else {
-		if ( push(char)(&blk_stk, cur) ) return e;
+		if ( push(char,BLK_MAX)(&blk_stk, cur) ) return e;
 	    }
 	} else if (cur == '\'') {
 	    //quotes are more complicated
-	    if (blk_stk.ptr != 0 && !peek(char)(&blk_stk, 1, &prev) && prev == '\'') {
-		if ( pop(char)(&blk_stk, NULL) ) return e;
+	    if (blk_stk.ptr != 0 && !peek(char,BLK_MAX)(&blk_stk, 1, &prev) && prev == '\'') {
+		if ( pop(char,BLK_MAX)(&blk_stk, NULL) ) return e;
 	    } else {
-		if ( push(char)(&blk_stk, cur) ) return e;
+		if ( push(char,BLK_MAX)(&blk_stk, cur) ) return e;
 	    }
 	}
 	s = fs_add(fs, s, 1);
@@ -271,7 +179,7 @@ static inline lbi strchr_block_rs(const spcl_fstream* fs, lbi s, lbi e, char c) 
 static inline lbi token_block(const spcl_fstream* fs, lbi s, lbi e, const char* cmp, size_t cmp_len) {
     if (!fs || !cmp)
 	return e;
-    stack(char) blk_stk = make_stack(char)();
+    stack(char,BLK_MAX) blk_stk = make_stack(char,BLK_MAX)();
     char prev;
     char cur = 0;
     while (lbicmp(s, e)) {
@@ -294,67 +202,34 @@ static inline lbi token_block(const spcl_fstream* fs, lbi s, lbi e, const char* 
 		return s;
 	}
 	if (cur == '(' || cur == '[' || cur == '{') {
-	    if ( push(char)(&blk_stk, cur) ) return e;
+	    if ( push(char,BLK_MAX)(&blk_stk, cur) ) return e;
 	} else if (cur == '}' || cur == ']' || cur == ')') {
-	    if ( pop(char)(&blk_stk, &prev)  || cur != get_match(prev) ) return e;
+	    if ( pop(char,BLK_MAX)(&blk_stk, &prev)  || cur != get_match(prev) ) return e;
 	//comments use more then one character
 	} else if (prev == '/' && cur == '*') {
-	    if ( push(char)(&blk_stk, '*') ) return e;
+	    if ( push(char,BLK_MAX)(&blk_stk, '*') ) return e;
 	} else if (prev == '*' && cur == '/') {
-	    if ( pop(char)(&blk_stk, &prev) || cur != get_match(prev) ) return e;
+	    if ( pop(char,BLK_MAX)(&blk_stk, &prev) || cur != get_match(prev) ) return e;
 	} else if (prev == '/' && cur == '/') {
-	    if ( push(char)(&blk_stk, cur) ) return e;
+	    if ( push(char,BLK_MAX)(&blk_stk, cur) ) return e;
 	//quotes are more complicated 
 	} else if (cur == '\"') {
-	    if (blk_stk.ptr != 0 && !peek(char)(&blk_stk, 1, &prev) && prev == '\"') {
-		if ( pop(char)(&blk_stk, NULL) ) return e;
+	    if (blk_stk.ptr != 0 && !peek(char,BLK_MAX)(&blk_stk, 1, &prev) && prev == '\"') {
+		if ( pop(char,BLK_MAX)(&blk_stk, NULL) ) return e;
 	    } else {
-		if ( push(char)(&blk_stk, cur) ) return e;
+		if ( push(char,BLK_MAX)(&blk_stk, cur) ) return e;
 	    }
 	} else if (cur == '\'') {
 	    //quotes are more complicated
-	    if (blk_stk.ptr != 0 && !peek(char)(&blk_stk, 1, &prev) && prev == '\'') {
-		if ( pop(char)(&blk_stk, NULL) ) return e;
+	    if (blk_stk.ptr != 0 && !peek(char,BLK_MAX)(&blk_stk, 1, &prev) && prev == '\'') {
+		if ( pop(char,BLK_MAX)(&blk_stk, NULL) ) return e;
 	    } else {
-		if ( push(char)(&blk_stk, cur) ) return e;
+		if ( push(char,BLK_MAX)(&blk_stk, cur) ) return e;
 	    }
 	}
 	s = fs_add(fs, s, 1);
     }
     return e;
-}
-
-int write_numeric(char* str, size_t n, double x) {
-    if (x >= 1000000)
-	return snprintf(str, n, "%e", x);
-    return snprintf(str, n, "%f", x);
-}
-
-/**
-  * Remove the whitespace surrounding a word
-  * Note: this function performs trimming "in place"
-  * returns: the length of the string including the null terminator
-  */
-static inline char* trim_whitespace(char* str, size_t* len) {
-    if (!str)
-	return NULL;
-    int started = 0;
-    _uint last_non = 0;
-    for (_uint i = 0; str[i]; ++i) {
-        if (!is_whitespace(str[i])) {
-            last_non = i;
-            if (!started && i > 0) {
-		_uint j = 0;
-		for (; str[i+j]; ++j)
-		    str[j] = str[i+j];
-		str[j] = 0;//we must null terminate
-            }
-	    started = 1;
-        }
-    }
-    str[last_non+1] = 0;
-    if (len) *len = last_non + 1;
-    return str;
 }
 
 /** ============================ lbi ============================ **/
@@ -737,7 +612,8 @@ spcl_val spcl_linspace(struct spcl_inst* c, spcl_fn_call f) {
     }
     return ret;
 }
-STACK_DEF(spcl_val)
+STACK_DEF(spcl_val,LST_MAX)
+STACK_DEF(size_t,LST_MAX)
 static const valtype FLATTEN_SIG[] = {VAL_LIST};
 spcl_val spcl_flatten(struct spcl_inst* c, spcl_fn_call f) {
     spcl_sigcheck(f, FLATTEN_SIG);
@@ -750,11 +626,11 @@ spcl_val spcl_flatten(struct spcl_inst* c, spcl_fn_call f) {
     }
     size_t cur_st = 0;
     //there may potentially be nested lists, we need to be able to find our way back to the parent and the index once we're done
-    stack(spcl_val) lists = make_stack(spcl_val)();
-    stack(size_t) inds = make_stack(size_t)();
+    stack(spcl_val,LST_MAX) lists = make_stack(spcl_val,LST_MAX)();
+    stack(size_t,LST_MAX) inds = make_stack(size_t,LST_MAX)();
     //just make sure that there's a root level on the stack to be popped out
-    if ( push(spcl_val)(&lists, cur_list) ) return ret;
-    if ( push(size_t)(&inds, 0) ) return ret;
+    if ( push(spcl_val,LST_MAX)(&lists, cur_list) ) return ret;
+    if ( push(size_t,LST_MAX)(&inds, 0) ) return ret;
 
     //this is used for estimating the size of the buffer we need. Take however many elements were needed for this list and assume each sub-list has the same number of elements
     size_t base_n_els = cur_list.n_els;
@@ -767,8 +643,8 @@ spcl_val spcl_flatten(struct spcl_inst* c, spcl_fn_call f) {
 	size_t start_depth = inds.ptr;
 	for (; i < cur_list.n_els; ++i) {
 	    if (cur_list.val.l[i].type == VAL_LIST) {
-		if ( push(spcl_val)(&lists, cur_list) ) return ret;
-		if ( push(size_t)(&inds, i+1) ) return ret;//push + 1 so that we start at the next index instead of reading the list again
+		if ( push(spcl_val,LST_MAX)(&lists, cur_list) ) return ret;
+		if ( push(size_t,LST_MAX)(&inds, i+1) ) return ret;//push + 1 so that we start at the next index instead of reading the list again
 		cur_list = cur_list.val.l[i];
 		cur_st = 0;
 		break;
@@ -780,7 +656,7 @@ spcl_val spcl_flatten(struct spcl_inst* c, spcl_fn_call f) {
 		if (!tmp_val) {
 		    free(ret.val.l);
 		    cleanup_spcl_fn_call(&f);
-		    destroy_stack(spcl_val)(&lists, &cleanup_spcl_val);
+		    destroy_stack(spcl_val,LST_MAX)(&lists, &cleanup_spcl_val);
 		    return spcl_make_err(E_NOMEM, "");
 		}
 		ret.val.l = tmp_val;
@@ -789,8 +665,8 @@ spcl_val spcl_flatten(struct spcl_inst* c, spcl_fn_call f) {
 	}
 	//if we reached the end of a list without any sublists then we should return back to the parent list
 	if (inds.ptr <= start_depth) {
-	    pop(size_t)(&inds, &cur_st);
-	    pop(spcl_val)(&lists, &cur_list);
+	    pop(size_t,LST_MAX)(&inds, &cur_st);
+	    pop(spcl_val,LST_MAX)(&lists, &cur_list);
 	}
     } while (lists.ptr);
     ret.type = VAL_LIST;
@@ -1908,7 +1784,7 @@ spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind
     *op_loc = rs.end;
     *open_ind = rs.end;*close_ind = rs.end;
     //keeps track of open and close [], (), {}, and ""
-    stack(char) blk_stk = make_stack(char)();
+    stack(char,BLK_MAX) blk_stk = make_stack(char,BLK_MAX)();
     //variable names are not allowed to start with '+', '-', or a digit and may not contain any '.' symbols. Use this to check whether the spcl_val is numeric
     char open_type, prev;
     char cur = 0;
@@ -1925,25 +1801,25 @@ spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind
 	if (cur == '(' || cur == '{' || cur == '[') {
 	    //if we've already found an entire block we can stop
 	    if (blk_stk.ptr == 0 && lbicmp(*open_ind, rs.end) < 0) break;
-	    push(char)(&blk_stk, cur);
+	    push(char,BLK_MAX)(&blk_stk, cur);
 	    //only set the open index if this is the first match
 	    if (lbicmp(*open_ind, rs.end) == 0) *open_ind = rs.start;
 	} else if (cur == ']' || cur == ')' || cur == '}') {
-	    if (pop(char)(&blk_stk, &open_type) || cur != get_match(open_type)) {
-		destroy_stack(char)(&blk_stk, NULL);
+	    if (pop(char,BLK_MAX)(&blk_stk, &open_type) || cur != get_match(open_type)) {
+		destroy_stack(char,BLK_MAX)(&blk_stk, NULL);
 		return spcl_make_err(E_BAD_SYNTAX, "unexpected %c", cur);
 	    }
 	    *close_ind = rs.start;
 	} else if (cur == '\"' && (prev != '\\')) {
 	    //quotes need to be handled in a special way since the open and close characters are identical
-	    if (peek(char)(&blk_stk, 1, &open_type) || cur != get_match(open_type)) {
+	    if (peek(char,BLK_MAX)(&blk_stk, 1, &open_type) || cur != get_match(open_type)) {
 		//if we've already found an entire block we can stop
 		if (blk_stk.ptr == 0 && lbicmp(*open_ind, rs.end) < 0) break;
-		push(char)(&blk_stk, cur);
+		push(char,BLK_MAX)(&blk_stk, cur);
 		//only set the open index if this is the first match
 		if (lbicmp(*open_ind, rs.end) == 0) *open_ind = rs.start;
 	    } else {
-		pop(char)(&blk_stk, &open_type);
+		pop(char,BLK_MAX)(&blk_stk, &open_type);
 		*close_ind = rs.start;
 	    }
 	} else if (cur == '/') {
@@ -1979,12 +1855,12 @@ spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind
 	}
     }
     if (blk_stk.ptr > 0) {
-	pop(char)(&blk_stk, &open_type);
-	destroy_stack(char)(&blk_stk, NULL);
+	pop(char,BLK_MAX)(&blk_stk, &open_type);
+	destroy_stack(char,BLK_MAX)(&blk_stk, NULL);
 	return spcl_make_err(E_BAD_SYNTAX, "expected %c", get_match(open_type));
     }
     if (new_end) *new_end = rs.start;
-    destroy_stack(char)(&blk_stk, NULL);
+    destroy_stack(char,BLK_MAX)(&blk_stk, NULL);
     return spcl_make_none();
 }
 //forward declare so that helpers can call
@@ -2696,18 +2572,15 @@ void spcl_set_valn(struct spcl_inst* c, const char* p_name, size_t namelen, spcl
 /**
  * For if, while, and for blocks, we need to find the enclosing block
  */
-static inline spcl_val get_block(spcl_key k, read_state* rs, lbi* open_ind, lbi* close_ind, lbi* new_end) {
+static inline spcl_val get_block(spcl_key k, read_state* rs, lbi* open_ind, lbi* close_ind) {
     //store the final end so that we can easily reset rs
-    lbi final_end = fs_end(rs->b);
+    lbi end = fs_end(rs->b);
     char open_char = 0;
     lbi op_loc;
     while (1) {//}
-	spcl_val v = find_operator(*rs, &op_loc, open_ind, close_ind, new_end);
+	spcl_val v = find_operator(*rs, &op_loc, open_ind, close_ind, &end);
 	if (v.type == VAL_ERR)
 	    return v;
-	//move the block forward
-	rs->start = *new_end;
-	rs->end = make_lbi(rs->start.line, rs->b->line_sizes[rs->start.line]);
 	if (lbicmp(*open_ind, rs->end) >= 0) {
 	    //we only accept single line blocks if there was a perenthesis that produces a well defined end and the statement is not a function.
 	    if (open_char != '(' || k == KEY_FN)//)
@@ -2716,18 +2589,20 @@ static inline spcl_val get_block(spcl_key k, read_state* rs, lbi* open_ind, lbi*
 	}
 	open_char = fs_get(rs->b, *open_ind);
 	if (open_char == '{'/*}*/) {
-	    rs->start = *open_ind;
+	    rs->start = fs_add(rs->b, *open_ind, 1);
 	    rs->end = *close_ind;
 	    return spcl_make_num(1);
 	}
+	//move the block forward
+	rs->start = fs_add(rs->b, *close_ind, 1);
+	rs->end = make_lbi(rs->start.line, rs->b->line_sizes[rs->start.line]);
     }
-    return spcl_make_num(1);
+    return spcl_make_err(E_BAD_SYNTAX, "something that should be impossible happened! congratulations!");
 }
-
 spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b) {
     spcl_val ret;
 
-    lbi end;
+    lbi open_ind, close_ind, end;
     read_state rs = make_read_state(b, make_lbi(0,0), make_lbi(0,0));
     //iterate over each line in the file
     while (lbicmp(rs.start, fs_end(rs.b)) < 0) {
@@ -2748,11 +2623,10 @@ spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b) {
 		return spcl_make_err(E_BAD_VALUE, "couldn't open file %s", fs_read(rs.b, rs.start));
 	    ret = spcl_read_lines(c, fs);
 	    end = rs.end;
-	}/* else if (start_key == KEY_IF) {
-	    spcl_val v = find_operator(rs, &op_loc, &open_ind, &close_ind, &new_end);
-	    if (v.type == VAL_ERR)
-		return v;
-	}*/ else {
+	/*TODO: if, else, for, and while
+	 * } else if (start_key == KEY_IF) {
+	    ret = get_block(start_key, &rs, &open_ind, &close_ind);*/
+	} else {
 	    ret = spcl_parse_line_rs(c, rs, &end, start_key);
 	}
 	if (ret.type == VAL_ERR || start_key == KEY_RET) {

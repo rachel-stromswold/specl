@@ -5,7 +5,6 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,7 +14,6 @@
 #define SPCL_ARGS_BSIZE 	16
 #define MAX_NUM_SIZE		10
 #define LINE_SIZE 		128
-#define STACK_SIZE		8
 #define ALLOC_LST_N		16
 #define MAX_PRINT_ELS		8
 
@@ -38,99 +36,11 @@ struct spcl_fn_call;
 
 //constants
 typedef struct spcl_val (*lib_call)(struct spcl_inst*, struct spcl_fn_call);
-typedef unsigned int _uint;
-typedef unsigned char _uint8;
 
 typedef enum { E_SUCCESS, E_NOFILE, E_LACK_TOKENS, E_BAD_SYNTAX, E_BAD_VALUE, E_BAD_TYPE, E_NOMEM, E_NAN, E_UNDEF, E_OUT_OF_RANGE, E_ASSERT, N_ERRORS } parse_ercode;
 typedef enum {VAL_UNDEF, VAL_ERR, VAL_NUM, VAL_STR, VAL_ARRAY, VAL_MAT, VAL_LIST, VAL_FN, VAL_INST, N_VALTYPES} valtype;
 //helper classes and things
 typedef enum {BLK_UNDEF, BLK_MISC, BLK_INVERT, BLK_TRANSFORM, BLK_DATA, BLK_ROOT, BLK_COMPOSITE, BLK_FUNC_DEC, BLK_LITERAL, BLK_COMMENT, BLK_SQUARE, BLK_QUOTE, BLK_QUOTE_SING, BLK_PAREN, BLK_CURLY, N_BLK_TYPES} blk_type;
-
-//generic stack class
-#define TYPED_A(NAME,TYPE) NAME##TYPE
-#define TYPED(NAME,TYPE) TYPED_A(NAME, _##TYPE)
-#define TYPED3(NAME,TA,TB) TYPED(TYPED_A(NAME,_##TA),TB)
-#define PAIR_DEF(TA,TB) struct TYPED3(PAIR,TA,TB) {					\
-    TA a;										\
-    TB b;										\
-} TYPED3(PAIR,TA,TB);									\
-struct TYPED3(PAIR,TA,TB) TYPED3(MAKE_PAIR,TA,TB)(TA pa, TB pb) {			\
-    struct TYPED3(PAIR,TA,TB) ret;ret.a = pa;ret.b = pb;				\
-    return ret;										\
-}											\
-typedef TYPED3(PAIR,TA,TB) p(TA,TB)
-#define stack(TYPE) struct TYPED(STACK,TYPE)
-#define STACK_DEF(TYPE) stack(TYPE) {							\
-    size_t ptr;										\
-    TYPE buf[STACK_SIZE];								\
-};											\
-stack(TYPE) TYPED(MAKE_STACK,TYPE)() {							\
-    stack(TYPE) ret;									\
-    ret.ptr = 0;									\
-    memset(ret.buf, 0, sizeof(TYPE)*STACK_SIZE);					\
-    return ret;										\
-}											\
-void TYPED(DESTROY_STACK,TYPE) (stack(TYPE)* s, void (*destroy_el)(TYPE*)) {		\
-    for (size_t i = 0; i < s->ptr; ++i)							\
-	destroy_el(s->buf + i);								\
-    s->ptr = 0;										\
-}											\
-int TYPED(STACK_PUSH,TYPE) (stack(TYPE)* s, TYPE el) {					\
-    if (s->ptr == STACK_SIZE)								\
-	return 1;									\
-    s->buf[s->ptr++] = el;								\
-    return 0;										\
-}											\
-int TYPED(STACK_POP,TYPE)(stack(TYPE)* s, TYPE* sto) {					\
-    if (s->ptr == 0 || s->ptr >= STACK_SIZE) return 1;					\
-    s->ptr -= 1;									\
-    if (sto) *sto = s->buf[s->ptr];							\
-    return 0;										\
-}											\
-int TYPED(STACK_PEEK,TYPE)(stack(TYPE)* s, size_t ind, TYPE* sto) {			\
-    if (ind == 0 || ind > s->ptr || ind > STACK_SIZE) return 1;				\
-    if (sto) *sto = s->buf[s->ptr-ind];							\
-    return 0;										\
-}
-/**
- * create a pair by shallow copying arguments a and b
- * a: argument to shallow copy
- * b: argument to shallow copy
- */
-#define make_p(TA,TB) TYPED3(MAKE_PAIR,TA,TB)
-/**
- * Create an empty stack
- */
-#define make_stack(TYPE) TYPED(MAKE_STACK,TYPE)
-/**
- * Cleanup all memory associated with the stack s.
- * s: the stack to destroy 
- * destroy_el: A callable function which deallocates memory associated for each element. Set to NULL if nothing needs to be done.
- * returns: 0 on success, 1 on failure (i.e. out of memory)
- */
-#define destroy_stack(TYPE) TYPED(DESTROY_STACK,TYPE)
-/**
- * Push a shallow copy onto the stack.
- * s: the stack to push onto
- * el: the element to push. Ownership is transferred to the stack, so make a copy if you need it
- * returns: 0 on success, 1 on failure (i.e. out of memory)
- */
-#define push(TYPE) TYPED(STACK_PUSH,TYPE)
-/**
- * Pop the object from the top of the stack and store it to the pointer sto. The caller is responsible for cleaning up any memory after a call to pop. 
- * s: the stack to pop from
- * sto: the location to save to (may be set to NULL)
- * returns: 0 on success, 1 on failure (i.e. popping from an empty stack)
- */
-#define pop(TYPE) TYPED(STACK_POP,TYPE) 
-/**
- * Examine the object ind indices down from the top of the stack and store it to the pointer sto without removal. Do not deallocate memory for this, as only a shallow copy is returned
- * s: the stack to peek in
- * ind: the index in the stack to read. Note that indices start at 1 as opposed to zero.
- * sto: the location to save to (may be set to NULL)
- * returns: 0 on success, 1 on failure (i.e. popping from an empty stack)
- */
-#define peek(TYPE) TYPED(STACK_PEEK,TYPE)
 
 /**
  * Macro to set a value while automagically calculating the string length
