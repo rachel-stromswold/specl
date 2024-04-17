@@ -458,9 +458,9 @@ void destroy_spcl_inst(spcl_inst* c);
  * Execute the mathematical operation in the string str at the location op_ind
  */
 #if SPCL_DEBUG_LVL>0
-spcl_val do_op(struct spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end);
-read_state make_read_state(const spcl_fstream* fs, lbi s, lbi e);
 typedef enum { KEY_NONE, KEY_IMPORT, KEY_CLASS, KEY_IF, KEY_FOR, KEY_ELSE, KEY_WHILE, KEY_BREAK, KEY_CONT, KEY_RET, KEY_FN, SPCL_N_KEYS } spcl_key;
+spcl_val do_op(struct spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end, spcl_key key);
+read_state make_read_state(const spcl_fstream* fs, lbi s, lbi e);
 spcl_key get_keyword(read_state* rs);
 spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind, lbi* new_end);
 #endif

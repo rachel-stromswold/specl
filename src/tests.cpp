@@ -186,61 +186,6 @@ TEST_CASE("spcl_val parsing") {
 	    CHECK(strcmp(element.val.l[2].val.s, "6") == 0);
 	}
 	cleanup_spcl_val(&tmp_val);
-	//test lists interpretations
-	strncpy(buf, "[[i*2 for i in range(2)], [i*2-1 for i in range(1,3)], [x for x in range(1,3,0.5)]]", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp_val = spcl_parse_line(sc, buf);
-	CHECK(tmp_val.type == VAL_LIST);
-	CHECK(tmp_val.val.l != NULL);
-	CHECK(tmp_val.n_els == 3);
-	{
-	    //check the first sublist
-	    spcl_val element = tmp_val.val.l[0];
-	    REQUIRE(element.type == VAL_LIST);
-	    REQUIRE(element.n_els == 2);
-	    REQUIRE(element.val.l != NULL);
-	    CHECK(element.val.l[0].type == VAL_NUM);
-	    CHECK(element.val.l[0].val.x == 0);
-	    CHECK(element.val.l[1].type == VAL_NUM);
-	    CHECK(element.val.l[1].val.x == 2);
-	    //check the second sublist
-	    element = tmp_val.val.l[1];
-	    REQUIRE(element.type == VAL_LIST);
-	    REQUIRE(element.n_els == 2);
-	    REQUIRE(element.val.l != NULL);
-	    CHECK(element.val.l[0].type == VAL_NUM);
-	    CHECK(element.val.l[0].val.x == 1);
-	    CHECK(element.val.l[1].type == VAL_NUM);
-	    CHECK(element.val.l[1].val.x == 3);
-	    //check the third sublist
-	    element = tmp_val.val.l[2];
-	    REQUIRE(element.type == VAL_LIST);
-	    REQUIRE(element.n_els == 4);
-	    REQUIRE(element.val.l != NULL);
-	    CHECK(element.val.l[0].type == VAL_NUM);
-	    CHECK(element.val.l[0].val.x == 1);
-	    CHECK(element.val.l[1].type == VAL_NUM);
-	    CHECK(element.val.l[1].val.x == 1.5);
-	    CHECK(element.val.l[2].type == VAL_NUM);
-	    CHECK(element.val.l[2].val.x == 2);
-	    CHECK(element.val.l[3].type == VAL_NUM);
-	    CHECK(element.val.l[3].val.x == 2.5);
-	}
-	cleanup_spcl_val(&tmp_val);
-	//test nested list interpretations
-	strncpy(buf, "[[x*y for x in range(1,6)] for y in range(5)]", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp_val = spcl_parse_line(sc, buf);
-	REQUIRE(tmp_val.type == VAL_LIST);
-	REQUIRE(tmp_val.val.l != NULL);
-	REQUIRE(tmp_val.n_els == 5);
-	for (size_t yy = 0; yy < tmp_val.n_els; ++yy) {
-	    CHECK(tmp_val.val.l[yy].type == VAL_LIST);
-	    CHECK(tmp_val.val.l[yy].n_els == 5);
-	    for (size_t xx = 0; xx < tmp_val.val.l[yy].n_els; ++xx) {
-		CHECK(tmp_val.val.l[yy].val.l[xx].type == VAL_NUM);
-		CHECK(tmp_val.val.l[yy].val.l[xx].val.x == (xx+1)*yy);
-	    }
-	}
-	cleanup_spcl_val(&tmp_val);
     }
     SUBCASE("Reading vectors to spcl_vals works") {
 	//test one element lists
@@ -546,6 +491,66 @@ TEST_CASE("operations") {
 	cleanup_spcl_val(&tmp_val);
     }
     destroy_spcl_inst(sc);
+}
+
+TEST_CASE("list interpretations") {
+    char buf[SPCL_STR_BSIZE];
+    spcl_inst* sc = make_spcl_inst(NULL);
+    //test lists interpretations
+    strncpy(buf, "[[i*2 for i in range(2)], [i*2-1 for i in range(1,3)], [x for x in range(1,3,0.5)]]", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+    spcl_val tmp_val = spcl_parse_line(sc, buf);
+    CHECK(tmp_val.type == VAL_LIST);
+    CHECK(tmp_val.val.l != NULL);
+    CHECK(tmp_val.n_els == 3);
+    {
+	//check the first sublist
+	spcl_val element = tmp_val.val.l[0];
+	REQUIRE(element.type == VAL_LIST);
+	REQUIRE(element.n_els == 2);
+	REQUIRE(element.val.l != NULL);
+	CHECK(element.val.l[0].type == VAL_NUM);
+	CHECK(element.val.l[0].val.x == 0);
+	CHECK(element.val.l[1].type == VAL_NUM);
+	CHECK(element.val.l[1].val.x == 2);
+	//check the second sublist
+	element = tmp_val.val.l[1];
+	REQUIRE(element.type == VAL_LIST);
+	REQUIRE(element.n_els == 2);
+	REQUIRE(element.val.l != NULL);
+	CHECK(element.val.l[0].type == VAL_NUM);
+	CHECK(element.val.l[0].val.x == 1);
+	CHECK(element.val.l[1].type == VAL_NUM);
+	CHECK(element.val.l[1].val.x == 3);
+	//check the third sublist
+	element = tmp_val.val.l[2];
+	REQUIRE(element.type == VAL_LIST);
+	REQUIRE(element.n_els == 4);
+	REQUIRE(element.val.l != NULL);
+	CHECK(element.val.l[0].type == VAL_NUM);
+	CHECK(element.val.l[0].val.x == 1);
+	CHECK(element.val.l[1].type == VAL_NUM);
+	CHECK(element.val.l[1].val.x == 1.5);
+	CHECK(element.val.l[2].type == VAL_NUM);
+	CHECK(element.val.l[2].val.x == 2);
+	CHECK(element.val.l[3].type == VAL_NUM);
+	CHECK(element.val.l[3].val.x == 2.5);
+    }
+    cleanup_spcl_val(&tmp_val);
+    //test nested list interpretations
+    strncpy(buf, "[[x*y for x in range(1,6)] for y in range(5)]", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+    tmp_val = spcl_parse_line(sc, buf);
+    REQUIRE(tmp_val.type == VAL_LIST);
+    REQUIRE(tmp_val.val.l != NULL);
+    REQUIRE(tmp_val.n_els == 5);
+    for (size_t yy = 0; yy < tmp_val.n_els; ++yy) {
+	CHECK(tmp_val.val.l[yy].type == VAL_LIST);
+	CHECK(tmp_val.val.l[yy].n_els == 5);
+	for (size_t xx = 0; xx < tmp_val.val.l[yy].n_els; ++xx) {
+	    CHECK(tmp_val.val.l[yy].val.l[xx].type == VAL_NUM);
+	    CHECK(tmp_val.val.l[yy].val.l[xx].val.x == (xx+1)*yy);
+	}
+    }
+    cleanup_spcl_val(&tmp_val);
 }
 
 TEST_CASE("builtin functions") {
@@ -867,7 +872,7 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	spcl_key tkey = get_keyword(&rs);
 	CHECK(tkey == KEY_FN);
 	CHECK(rs.start.line == 0);
-	CHECK(rs.start.off == 2);
+	CHECK(rs.start.off == 3);
 	//find the parenthesis
 	lbi op_loc, open_ind, close_ind, new_end;
 	spcl_val er = find_operator(rs, &op_loc, &open_ind, &close_ind, &new_end);
@@ -902,7 +907,7 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	destroy_spcl_fstream(fs);
     }
     SUBCASE("open brace on the same line") {
-	const char* lines[] = { "fn test_fun(a)", "{", "if a > 5 {return 1}", "return 0", "}" };
+	const char* lines[] = { " fn  test_fun(a) {", "if a > 5 {return 1}", "return 0", "}" };
 	size_t n_lines = sizeof(lines)/sizeof(char*);
 	write_test_file(lines, n_lines, TEST_FNAME);
 	//check the lines (curly brace on new line)
@@ -917,19 +922,19 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	spcl_key tkey = get_keyword(&rs);
 	CHECK(tkey == KEY_FN);
 	CHECK(rs.start.line == 0);
-	CHECK(rs.start.off == 2);
+	CHECK(rs.start.off == 5);
 	//find the parenthesis
 	lbi op_loc, open_ind, close_ind, new_end;
 	spcl_val er = find_operator(rs, &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
-	CHECK(open_ind.line == 0);CHECK(open_ind.off == strlen("fn test_fun"));
-	CHECK(close_ind.line == 0);CHECK(close_ind.off == fs->line_sizes[0]-1);
+	CHECK(open_ind.line == 0);CHECK(open_ind.off == strlen(" fn  test_fun"));
+	CHECK(close_ind.line == 0);CHECK(close_ind.off == 15);
 	CHECK(lbicmp(op_loc, new_end) >= 0);
 	//check the braces around the if statement
-	er = find_operator(make_read_state(fs, make_lbi(2,0), make_lbi(3,0)), &op_loc, &open_ind, &close_ind, &new_end);
+	er = find_operator(make_read_state(fs, make_lbi(1,0), make_lbi(2,0)), &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
-	CHECK(open_ind.line == 2);CHECK(open_ind.off == strlen("if a > 5 "));
-	CHECK(close_ind.line == 2);CHECK(close_ind.off == 18);
+	CHECK(open_ind.line == 1);CHECK(open_ind.off == strlen("if a > 5 "));
+	CHECK(close_ind.line == 1);CHECK(close_ind.off == 18);
 	//move to the next character after the open brace and get the contents
 	open_ind.off += 1;
 	spcl_fstream* b_if_con = fs_get_enclosed(fs, open_ind, close_ind);
@@ -1008,14 +1013,14 @@ TEST_CASE("spcl_inst lookups") {
 
 TEST_CASE("spcl_inst parsing") {
     SUBCASE ("without nesting") {
-	const char* lines[] = { "a = 1", "\"b\"", " c = [\"d\", \"e\"]" }; 
+	const char* lines[] = { "a1 = 1", "\"b\"", " c = [\"d\", \"e\"]" };
 	size_t n_lines = sizeof(lines)/sizeof(char*);
 	write_test_file(lines, n_lines, TEST_FNAME);
 	spcl_val er;
 	spcl_inst* c = spcl_inst_from_file(TEST_FNAME, &er, 0, NULL);
 	CHECK(er.type != VAL_ERR);
 	//lookup the named spcl_vals
-	spcl_val val_a = spcl_find(c, "a");
+	spcl_val val_a = spcl_find(c, "a1");
 	CHECK(val_a.type == VAL_NUM);
 	CHECK(val_a.val.x == 1);
 	spcl_val val_c = spcl_find(c, "c");
@@ -1089,10 +1094,10 @@ TEST_CASE("spcl_inst parsing") {
 	char* tmp_name = strdup(fun_name);
 
 	const char* lines[] = {
-	    "test_fun = fn(i) {",
+	    "fn test_fun = (i) {",
 	    "return (i < 2)? \"a\" : \"b\"",
 	    "}",
-	    "inst_fn = fn(n) {",
+	    "fn inst_fn = (n) {",
 	    "return {__type__ = \"test_inst\";num = n}",
 	    "}",
 	    "a = test_fun(1);",
@@ -1268,7 +1273,7 @@ TEST_CASE("file parsing") {
 }
 TEST_CASE("file importing") {
     const char* lines1[] = {
-	"double = fn(n) {",
+	"fn double = (n) {",
 	    "mul = 2;"
 	    "return mul*n;"
 	"}" };
