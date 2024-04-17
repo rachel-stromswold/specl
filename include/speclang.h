@@ -450,12 +450,19 @@ int spcl_find_float(const spcl_inst* c, const char* str, double* sto);
  */
 void spcl_set_valn(struct spcl_inst* c, const char* name, size_t namelen, spcl_val new_val, int copy);
 /**
- * Given a string str (which will be modified by this call), return a spcl_val corresponding to the expression str
+ * Given a string str, return a spcl_val corresponding to the expression str
  * c: the spcl_inst to use when looking for variables and functions
  * str: the string expression to parse
  * returns: a spcl_val with the resultant expression
  */
-spcl_val spcl_parse_line(struct spcl_inst* c, char* str);
+spcl_val spcl_parse_line(struct spcl_inst* c, const char* str);
+/**
+ * Test whether the string str evaluates to true when using c.
+ * c: the spcl_inst to use when looking for variables and functions
+ * str: the string expression to parse
+ * returns: 0 if str evaluated to false or an error occurred during parsing. Otherwise, 1 is returned.
+ */
+int spcl_test(struct spcl_inst* c, const char* str);
 /**
  * Generate a spcl_inst from a list of lines. This spcl_inst will include function declarations, named variables, and subinstances.
  * lines: the array of lines to read from

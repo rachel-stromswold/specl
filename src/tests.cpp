@@ -7,12 +7,6 @@ extern "C" {
 }
 #define STRIFY(S) #S
 
-bool spcl_true(spcl_val v) {
-    if (v.type != VAL_NUM || v.val.x == 0)
-	return false;
-    return true;
-}
-
 void test_num(spcl_val v, double x) {
     CHECK(v.type == VAL_NUM);
     CHECK(v.val.x == x);
@@ -300,34 +294,23 @@ TEST_CASE("operations") {
     }
     SUBCASE("Comparisons work") {
 	//create a single true and false, this makes things easier
-        strncpy(buf, "2 == 2", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	spcl_val tmp_val = spcl_parse_line(sc, buf);
-        CHECK(tmp_val.type == VAL_NUM);
-        CHECK(spcl_true(tmp_val));
-        strncpy(buf, "1 == 2", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp_val = spcl_parse_line(sc, buf);
-        CHECK(tmp_val.type == VAL_NUM);
-        CHECK(!spcl_true(tmp_val));
-        strncpy(buf, "[2, 3] == [2,3]", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp_val = spcl_parse_line(sc, buf);
-        CHECK(tmp_val.type == VAL_NUM);
-        CHECK(spcl_true(tmp_val));
-        strncpy(buf, "[2, 3, 4] == [2, 3]", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp_val = spcl_parse_line(sc, buf);
-        CHECK(tmp_val.type == VAL_NUM);
-        CHECK(!spcl_true(tmp_val));
-        strncpy(buf, "[2, 3, 4] == [2, 3, 5]", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp_val = spcl_parse_line(sc, buf);
-        CHECK(tmp_val.type == VAL_NUM);
-        CHECK(!spcl_true(tmp_val));
-        strncpy(buf, "\"apple\" == \"apple\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp_val = spcl_parse_line(sc, buf);
-        CHECK(tmp_val.type == VAL_NUM);
-        CHECK(spcl_true(tmp_val));
-        strncpy(buf, "\"apple\" == \"banana\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp_val = spcl_parse_line(sc, buf);
-        CHECK(tmp_val.type == VAL_NUM);
-        CHECK(!spcl_true(tmp_val));
+	CHECK(spcl_test(sc, "2 == 2") == 1);
+	CHECK(spcl_test(sc, "1 == 2") == 0);
+	CHECK(spcl_test(sc, "[2, 3] == [2, 3]") == 1);
+	CHECK(spcl_test(sc, "[2, 3, 4] == [2, 3]") == 0);
+	CHECK(spcl_test(sc, "[2, 3, 4] == [2, 3, 5]") == 0);
+	CHECK(spcl_test(sc, "\"apple\" == \"apple\"") == 1);
+	CHECK(spcl_test(sc, "\"apple\" == \"banana\"") == 0);
+
+	CHECK(spcl_test(sc, "1 == 1") == 1);
+	CHECK(spcl_test(sc, "1 == 2") == 0);
+	CHECK(spcl_test(sc, "1 >= 1") == 1);
+	CHECK(spcl_test(sc, "1 > 1") == 0);
+	CHECK(spcl_test(sc, "-1 > 1") == 0);
+	CHECK(spcl_test(sc, "1 <= 1") == 1);
+	CHECK(spcl_test(sc, "1 < 2") == 1);
+	CHECK(spcl_test(sc, "1 < 1") == 0);
+	CHECK(spcl_test(sc, "1 < -1") == 0);
     }
     SUBCASE("String concatenation works") {
         //single operations
@@ -339,75 +322,18 @@ TEST_CASE("operations") {
         cleanup_spcl_val(&tmp_val);
 	CHECK(tmp_val.n_els == 0);
     }
-    SUBCASE("comparisons work") {
-	//equality
-	strncpy(buf, "1 == 1", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	spcl_val tmp = spcl_parse_line(sc, buf);
-	CHECK(spcl_true(tmp));
-	strncpy(buf, "1 == 2", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(!spcl_true(tmp));
-	//geq
-	strncpy(buf, "1 >= 1", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(tmp.type == VAL_NUM);
-	CHECK(spcl_true(tmp));
-	//greater than
-	strncpy(buf, "1 > 1", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(!spcl_true(tmp));
-	strncpy(buf, "-1 > 1", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(!spcl_true(tmp));
-	//leq
-	strncpy(buf, "1 <= 1", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(spcl_true(tmp));
-	//less than
-	strncpy(buf, "1 < 2", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(spcl_true(tmp));
-	strncpy(buf, "1 < 1", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(!spcl_true(tmp));
-	strncpy(buf, "1 < -1", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(!spcl_true(tmp));
-    }
     SUBCASE("boolean operations work") {
 	//or
-	strncpy(buf, "false || false", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	spcl_val tmp = spcl_parse_line(sc, buf);
-	CHECK(!spcl_true(tmp));
-	strncpy(buf, "true || false", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(spcl_true(tmp));
-	strncpy(buf, "false || true", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(spcl_true(tmp));
-	strncpy(buf, "true || true", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(spcl_true(tmp));
-	//and
-	strncpy(buf, "false && false", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(!spcl_true(tmp));
-	strncpy(buf, "true && false", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(!spcl_true(tmp));
-	strncpy(buf, "false && true", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(!spcl_true(tmp));
-	strncpy(buf, "true && true", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(spcl_true(tmp));
-	//not
-	strncpy(buf, "!false", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(spcl_true(tmp));
-	strncpy(buf, "!true", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
-	tmp = spcl_parse_line(sc, buf);
-	CHECK(!spcl_true(tmp));
+	CHECK(spcl_test(sc, "false || false") == 0);
+	CHECK(spcl_test(sc, "true || false") == 1);
+	CHECK(spcl_test(sc, "false || true") == 1);
+	CHECK(spcl_test(sc, "true || true") == 1);
+	CHECK(spcl_test(sc, "false && false") == 0);
+	CHECK(spcl_test(sc, "true && false") == 0);
+	CHECK(spcl_test(sc, "false && true") == 0);
+	CHECK(spcl_test(sc, "true && true") == 1);
+	CHECK(spcl_test(sc, "!false") == 1);
+	CHECK(spcl_test(sc, "!true") == 0);
     }
     SUBCASE("Ternary operators work") {
 	strncpy(buf, "(false) ? 100 : 200", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
@@ -1217,32 +1143,19 @@ TEST_CASE("file parsing") {
     CHECK(v.type == VAL_NUM);CHECK(v.val.x == 24.2);
     v = spcl_find(c, "acid_test");
     CHECK(v.type == VAL_NUM);CHECK(v.val.x == 16);
-    v = spcl_find(c, "acid_res");
-    CHECK(spcl_true(v));
+    CHECK(spcl_test(c, "acid_res"));
     //lookup only does a shallow copy so we don't need to free
-
-    strncpy(buf, "gs.__type__ == \"Gaussian_source\"", SPCL_STR_BSIZE);
-    CHECK(spcl_true(spcl_parse_line(c, buf)));
-    strncpy(buf, "gs.component == \"Ey\"", SPCL_STR_BSIZE);
-    CHECK(spcl_true(spcl_parse_line(c, buf)));
-    strncpy(buf, "gs.wavelength == 1.5", SPCL_STR_BSIZE);
-    CHECK(spcl_true(spcl_parse_line(c, buf)));
-    strncpy(buf, "gs.amplitude == 7", SPCL_STR_BSIZE);
-    CHECK(spcl_true(spcl_parse_line(c, buf)));
-    strncpy(buf, "gs.width == 3", SPCL_STR_BSIZE);
-    CHECK(spcl_true(spcl_parse_line(c, buf)));
-    strncpy(buf, "gs.phase == 0.75", SPCL_STR_BSIZE);
-    CHECK(spcl_true(spcl_parse_line(c, buf)));
-    strncpy(buf, "gs.cutoff == 6", SPCL_STR_BSIZE);
-    CHECK(spcl_true(spcl_parse_line(c, buf)));
-    strncpy(buf, "gs.start_time == 5.2", SPCL_STR_BSIZE);
-    CHECK(spcl_true(spcl_parse_line(c, buf)));
-    strncpy(buf, "gs.region.__type__ == \"Box\"", SPCL_STR_BSIZE);
-    CHECK(spcl_true(spcl_parse_line(c, buf)));
-    strncpy(buf, "gs.region.pt_1 == vec(0,0,.2)", SPCL_STR_BSIZE);
-    CHECK(spcl_true(spcl_parse_line(c, buf)));
-    strncpy(buf, "gs.region.pt_2 == vec(.4, 0.4, .2)", SPCL_STR_BSIZE);
-    CHECK(spcl_true(spcl_parse_line(c, buf)));
+    CHECK(spcl_test(c, "gs.__type__ == \"Gaussian_source\""));
+    CHECK(spcl_test(c, "gs.component == \"Ey\""));
+    CHECK(spcl_test(c, "gs.wavelength == 1.5"));
+    CHECK(spcl_test(c, "gs.amplitude == 7"));
+    CHECK(spcl_test(c, "gs.width == 3"));
+    CHECK(spcl_test(c, "gs.phase == 0.75"));
+    CHECK(spcl_test(c, "gs.cutoff == 6"));
+    CHECK(spcl_test(c, "gs.start_time == 5.2"));
+    CHECK(spcl_test(c, "gs.region.__type__ == \"Box\""));
+    CHECK(spcl_test(c, "gs.region.pt_1 == vec(0,0,.2)"));
+    CHECK(spcl_test(c, "gs.region.pt_2 == vec(.4, 0.4, .2)"));
     //now try using the builtin find functions
     int n;
     unsigned len;

@@ -2439,30 +2439,25 @@ static inline spcl_val spcl_parse_line_rs(struct spcl_inst* c, read_state rs, lb
     //TODO: the current implementation may leak memory if the user declares a variable without assigning it. I still haven't decided upon the most elegant solution
     return sto;
 }
-spcl_val spcl_parse_line(spcl_inst* c, char* str) {
+spcl_val spcl_parse_line(spcl_inst* c, const char* str) {
     //Setup a dummy line buffer. We're calling alloca with sizes known at compile-time, don't get mad at me.
     str_to_fs(str);
-    /*spcl_fstream fs;
-    fs.lines = alloca(sizeof(char*));
-    fs.line_sizes = alloca(sizeof(size_t));
-    fs.lines[0] = str;
-    fs.line_sizes[0] = strlen(str);
-    fs.n_lines = 1;*/
     return spcl_parse_line_rs(c, make_read_state(&fs, make_lbi(0,0), make_lbi(0, fs.line_sizes[0])), NULL, KEY_NONE);
 }
 int spcl_test(spcl_inst* c, const char* str) {
     str_to_fs(str);
-    return 1;
+    spcl_val v = spcl_parse_line_rs(c, make_read_state(&fs, make_lbi(0,0), make_lbi(0, fs.line_sizes[0])), NULL, KEY_NONE);
+    //check whether the statement v is true
+    int ret = 1;
+    if (v.type == VAL_ERR || v.type == VAL_UNDEF || (v.type == VAL_NUM && v.val.x == 0))
+	ret = 0;
+    //cleanup the temporary memory allocated
+    cleanup_spcl_val(&v);
+    return ret;
 }
 spcl_val spcl_find(const struct spcl_inst* c, const char* str) {
     //Setup a dummy line buffer. We're calling alloca with sizes known at compile-time, don't get mad at me.
     str_to_fs(str);
-    /*spcl_fstream fs;
-    fs.lines = alloca(sizeof(char*));
-    fs.line_sizes = alloca(sizeof(size_t));
-    fs.lines[0] = str;
-    fs.line_sizes[0] = strlen(str);
-    fs.n_lines = 1;*/
     return spcl_find_rs( c, make_read_state(&fs, make_lbi(0,0), make_lbi(0, fs.line_sizes[0])) );
 }
 int spcl_find_object(const spcl_inst* c, const char* str, const char* typename, spcl_inst** sto) {
