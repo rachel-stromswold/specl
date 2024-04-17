@@ -9,6 +9,15 @@
 #define lengthof(s)   (countof(s) - 1)
 #define mkarr(a, t, n)  (t *)xrealloc(a, sizeof(t)*n)
 
+//this is a macro to initialize a dummy line_buffer named fs.
+#define str_to_fs(str)				\
+    spcl_fstream fs;				\
+    fs.lines = alloca(sizeof(char*));		\
+    fs.line_sizes = alloca(sizeof(size_t));	\
+    fs.lines[0] = str;				\
+    fs.line_sizes[0] = strlen(str);		\
+    fs.n_lines = 1
+
 //generic stack class
 #define TYPED_A(NAME,TYPE) NAME##TYPE
 #define TYPED(NAME,TYPE) TYPED_A(NAME, _##TYPE)

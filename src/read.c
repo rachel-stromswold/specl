@@ -1859,7 +1859,12 @@ spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind
 	destroy_stack(char,BLK_MAX)(&blk_stk, NULL);
 	return spcl_make_err(E_BAD_SYNTAX, "expected %c", get_match(open_type));
     }
-    if (new_end) *new_end = rs.start;
+    if (new_end) {
+	//if we didn't find an operator then we have to move the location to the new end to signal that it wasn't found
+	if (!op_prec)
+	    *op_loc = rs.start;
+	*new_end = rs.start;
+    }
     destroy_stack(char,BLK_MAX)(&blk_stk, NULL);
     return spcl_make_none();
 }
@@ -2436,22 +2441,28 @@ static inline spcl_val spcl_parse_line_rs(struct spcl_inst* c, read_state rs, lb
 }
 spcl_val spcl_parse_line(spcl_inst* c, char* str) {
     //Setup a dummy line buffer. We're calling alloca with sizes known at compile-time, don't get mad at me.
-    spcl_fstream fs;
+    str_to_fs(str);
+    /*spcl_fstream fs;
     fs.lines = alloca(sizeof(char*));
     fs.line_sizes = alloca(sizeof(size_t));
     fs.lines[0] = str;
     fs.line_sizes[0] = strlen(str);
-    fs.n_lines = 1;
+    fs.n_lines = 1;*/
     return spcl_parse_line_rs(c, make_read_state(&fs, make_lbi(0,0), make_lbi(0, fs.line_sizes[0])), NULL, KEY_NONE);
+}
+int spcl_test(spcl_inst* c, const char* str) {
+    str_to_fs(str);
+    return 1;
 }
 spcl_val spcl_find(const struct spcl_inst* c, const char* str) {
     //Setup a dummy line buffer. We're calling alloca with sizes known at compile-time, don't get mad at me.
-    spcl_fstream fs;
+    str_to_fs(str);
+    /*spcl_fstream fs;
     fs.lines = alloca(sizeof(char*));
     fs.line_sizes = alloca(sizeof(size_t));
     fs.lines[0] = str;
     fs.line_sizes[0] = strlen(str);
-    fs.n_lines = 1;
+    fs.n_lines = 1;*/
     return spcl_find_rs( c, make_read_state(&fs, make_lbi(0,0), make_lbi(0, fs.line_sizes[0])) );
 }
 int spcl_find_object(const spcl_inst* c, const char* str, const char* typename, spcl_inst** sto) {
@@ -2766,7 +2777,10 @@ spcl_val spcl_uf_eval(spcl_uf* uf, spcl_inst* c, spcl_fn_call call) {
 	for (size_t i = 0; i < uf->call_sig.n_args; ++i) {
 	    spcl_set_valn(uf->fn_scope, uf->call_sig.args[i].val.s, uf->call_sig.args[i].n_els, call.args[i], 0);
 	}
-	return spcl_read_lines(uf->fn_scope, uf->code_lines);
+	spcl_val ret = spcl_read_lines(uf->fn_scope, uf->code_lines);
+	//function calls make shallow copies, so we need to reset memory to avoid double frees
+	memset( uf->fn_scope->table, 0, sizeof(name_val_pair)*con_size(uf->fn_scope) );
+	return ret;
 
     }
     return spcl_make_err(E_BAD_VALUE, "function not implemented");
