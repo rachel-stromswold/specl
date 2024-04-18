@@ -1733,8 +1733,11 @@ static inline int get_oplen(char op, char next) {
     //return 0 if the character isn't an operator
     if (op < 0 || op > MAX_ASCII || (OP1_PRECS[op] == 0 && OP2_PRECS[op] == 0))
 	return 0;
+    //only the '?' operator does not accept an '=' operator immediately after
+    if (op == '?')
+	return 1;
     //matches characters '!', '?', '+', '-', '*', '/', '<', '=', '>', '.', and ','. hopefully those last two don't cause problems
-    if ( op == '!' || op == '?' || op == '^' || (op >= '*' && op <= '/') || (op >= '<' && op <= '>') ) {
+    if ( op == '!' || op == '^' || (op >= '*' && op <= '/') || (op >= '<' && op <= '>') ) {
 	if (next == '=')
 	    return 2;
 	return 1;
@@ -1787,7 +1790,8 @@ spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind
     stack(char,BLK_MAX) blk_stk = make_stack(char,BLK_MAX)();
     //variable names are not allowed to start with '+', '-', or a digit and may not contain any '.' symbols. Use this to check whether the spcl_val is numeric
     char open_type, prev;
-    char cur = 0;
+    char cur = fs_get(rs.b, rs.start);
+    int is_num = ((cur >= '0' && cur <= '9') || cur == '.');
 
     //keep track of the precedence of the orders of operation (lower means executed later) ">,=,>=,==,<=,<"=4 "+,-"=3, "*,/"=2, "**"=1
     int op_prec = 0;
@@ -1845,7 +1849,7 @@ spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind
 		rs.start = fs_add(rs.b, rs.start, oplen-1);	
 	    } else if (oplen == 1 && op_prec < OP1_PRECS[cur]) {
 		//avoid matches with numeric literals
-		if (OP1_PRECS[cur] == OP1_PRECS['-'] && (prev == 'e' || prev == 'E'))
+		if (OP1_PRECS[cur] == OP1_PRECS['-'] && is_num && (prev == 'e' || prev == 'E'))
 		    continue;
 		*op_loc = rs.start;
 		op_prec = OP1_PRECS[cur];

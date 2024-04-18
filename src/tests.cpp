@@ -1057,7 +1057,12 @@ TEST_CASE("spcl_inst parsing") {
 	//first we add a bunch of arbitrary variables to make searching harder for the parser
 	const char* lines1[] = {
 	    "Vodkis=1","Pagne=2","Meadaj=3","whis=4","nac4=5","RaKi=6","gyn=7","cid=8","Daiqui=9","Mooshi=10","Magnac=2","manChe=3","tes=4","Bourbu=5","magna=6","sak=7","Para=8","Keffi=9","Guino=10","Uuqax=11","Thraxeods=12","Trinzoins=13","gheds=14","theSoild=15","vengirs=16",
-	    "y = 2.0", "xs = linspace(0, y, 10000)", "arr1 = [math.sin(6*x/y) for x in xs]" };
+	    "y = 2.0",
+	    "xs = linspace(0, y, 10000)",
+	    "arr1 = [math.sin(6*x/y) for x in xs]",
+	    "one = 1",
+	    "two = 2",
+	    "three=one+two"};
 	size_t n_lines1 = sizeof(lines1)/sizeof(char*);
 	write_test_file(lines1, n_lines1, TEST_FNAME);
 	spcl_fstream* b_1 = make_spcl_fstream(TEST_FNAME);
@@ -1073,6 +1078,7 @@ TEST_CASE("spcl_inst parsing") {
 	cleanup_spcl_val(&tmp_f);
 	er = spcl_read_lines(c, b_2);
 	CHECK(er.type != VAL_ERR);
+	CHECK(spcl_test(c, "three == 3"));
 	destroy_spcl_inst(c);
 	destroy_spcl_fstream(b_1);
 	destroy_spcl_fstream(b_2);
