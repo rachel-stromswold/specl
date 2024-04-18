@@ -1936,7 +1936,7 @@ static inline spcl_val spcl_find_rs(const spcl_inst* c, read_state rs) {
     }
 }
 /**
- * similar to set_spcl_val(), but read in place from a read state
+ * similar to set_spcl_valn(), but read in place from a read state
  */
 static inline spcl_val set_spcl_val_rs(struct spcl_inst* c, read_state rs, spcl_val p_val) {
     lbi dot_loc = strchr_block_rs(rs.b, rs.start, rs.end, '.');
@@ -2656,27 +2656,75 @@ spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b) {
     return spcl_make_none();
 }
 
-spcl_inst* spcl_inst_from_file(const char* fname, spcl_val* error, int argc, char** argv) {
-    //create a new spcl_inst
-    spcl_inst* ret = make_spcl_inst(NULL);
+spcl_val spcl_inst_from_file(const char* fname, int argc, const char** argv) {
     //read command line arguments
-    spcl_val er = spcl_make_none();
-    for (int i = 0; argv && i < argc; ++i) {
-	er = spcl_parse_line(ret, argv[i]);
-	if (er.type == VAL_ERR) {
-	    fprintf(stderr, "Error %s in option %d: %s\n", errnames[er.val.e->c], i, er.val.e->msg);
-	    if (error)
-		*error = er;
+    spcl_val ret = {0};
+    //create a new spcl_inst
+    spcl_inst* c = make_spcl_inst(NULL);
+    spcl_fstream* fs;
+    if (argc > 0 && argv) {
+	//create a buffer that we'll populate with [argv[0], argv[1], ...]
+	int tmp_n = SPCL_STR_BSIZE;
+	char* tmp_str = xmalloc(tmp_n);
+	stpncpy(tmp_str, "argv=[", SPCL_STR_BSIZE);
+	int j = (int)strlen("argv=[");
+	for (int i = 0; i < argc; ++i) {
+	    //store whether argv[i] is a flag like -r
+	    int is_flag = 0;
+	    //find the first non-dash character
+	    int k = 0;
+	    if (argv[i][0] == '-' && argv[i][1] != '-') {
+		tmp_str[j++] = '\"';
+		k = 1;
+		is_flag = 1;
+	    } else if (argv[i][0] == '-' && argv[i][1] == '-') {
+		k = 2;
+	    }
+	    for (;; ++k) {
+		if (j+2 >= tmp_n) {
+		    tmp_n *= 2;
+		    tmp_str = xrealloc(tmp_str, tmp_n);
+		}
+		//when we reach the end of an argument either add a comma or end brace
+		if (argv[i][k] == 0) {
+		    //we have to put the close quote around flags
+		    if (is_flag)
+			tmp_str[j++] = '\"';
+		    tmp_str[j++] = (i+1 < argc) ? ',' : ']';
+		    break;
+		}
+		tmp_str[j++] = argv[i][k];
+	    }
+	}
+	//now read that buffer and free memory
+	ret = spcl_parse_line(c, tmp_str);
+	free(tmp_str);
+	
+	/*fs = make_spcl_fstreamn(NULL, 0);
+	spcl_fstream_append(fs, "argv=[");
+	for (int i = 0; i < argc; ++i) {
+	    spcl_fstream_append(fs, argv[i]);
+	    spcl_fstream_append(fs, (i+1 < argc) ? "," : "]");
+	}
+	ret = spcl_read_lines(c, fs);
+	destroy_spcl_fstream(fs);*/
+	if (ret.type == VAL_ERR) {
+	    destroy_spcl_inst(c);
+	    return ret;
 	}
     }
-    //read the rest of the file
-    spcl_fstream* fs = make_spcl_fstream(fname);
-    if (fs)
-	er = spcl_read_lines(ret, fs);
-    else
-	er = spcl_make_err(E_BAD_VALUE, "couldn't open file %s", fname);
-    if (error)
-	*error = er;
+    //read the rest of the file and check to ensure the file was opened successfully
+    fs = make_spcl_fstream(fname);
+    if (fs) {
+	ret = spcl_read_lines(c, fs);
+	if (!ret.type) {
+	    ret.type = VAL_INST;
+	    ret.n_els = 1;
+	    ret.val.c = c;
+	}
+    } else {
+	ret = spcl_make_err(E_BAD_VALUE, "couldn't open file %s", fname);
+    }
     destroy_spcl_fstream(fs);
     return ret;
 }

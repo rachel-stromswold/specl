@@ -347,10 +347,9 @@ typedef struct read_state {
  * fname: the name of the file to read
  * argc: the number arguments
  * argv: an array of arguments taken from the command-line. Note that callers should not directly pass argc,argv from int main(). Rather, argv should only include valid spclang commands. If you know that spclang commands start at the index i, then you should call spcl_inst_from_file(fname, argc-i, argv+(size_t)i).
- * error: if not NULL, errors are saved to this pointer.
- * returns: a newly created spcl_inst with the contents of fname and argv. The caller is responsible for deallocating memory by calling destroy_inst().
+ * returns: on success, the return type is a VAL_INST and return.val.c is a valid instance. On an error parsing 
  */
-spcl_inst* spcl_inst_from_file(const char* fname, spcl_val* error, int argc, char** argv);
+spcl_val spcl_inst_from_file(const char* fname, int argc, const char** argv);
 /**
  * make an empty spcl_inst. The result must be destroyed using destroy_inst().
  * parent: the parent of this spcl_inst so that we can look up in scope (i.e. a function can access global variables)

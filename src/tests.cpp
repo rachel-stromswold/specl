@@ -942,19 +942,18 @@ TEST_CASE("spcl_inst parsing") {
 	const char* lines[] = { "a1 = 1", "\"b\"", " c = [\"d\", \"e\"]" };
 	size_t n_lines = sizeof(lines)/sizeof(char*);
 	write_test_file(lines, n_lines, TEST_FNAME);
-	spcl_val er;
-	spcl_inst* c = spcl_inst_from_file(TEST_FNAME, &er, 0, NULL);
-	CHECK(er.type != VAL_ERR);
+	spcl_val v = spcl_inst_from_file(TEST_FNAME, 0, NULL);
+	CHECK(v.type != VAL_ERR);
 	//lookup the named spcl_vals
-	spcl_val val_a = spcl_find(c, "a1");
+	spcl_val val_a = spcl_find(v.val.c, "a1");
 	CHECK(val_a.type == VAL_NUM);
 	CHECK(val_a.val.x == 1);
-	spcl_val val_c = spcl_find(c, "c");
+	spcl_val val_c = spcl_find(v.val.c, "c");
 	CHECK(val_c.type == VAL_LIST);
 	CHECK(val_c.n_els == 2);
 	CHECK(val_c.val.l[0].type == VAL_STR);
 	CHECK(val_c.val.l[1].type == VAL_STR);
-	destroy_spcl_inst(c);
+	cleanup_spcl_val(&v);
     }
     SUBCASE ("with nesting") {
 	const char* lines[] = { "a = {name = \"apple\";", "spcl_vals = [20, 11]}", "b = a.spcl_vals[0]", "c = a.spcl_vals[1] + a.spcl_vals[0]+1" }; 
@@ -1031,21 +1030,20 @@ TEST_CASE("spcl_inst parsing") {
 	size_t n_lines = sizeof(lines)/sizeof(char*);
 	write_test_file(lines, n_lines, TEST_FNAME);
 	//read the file and check for errors
-	spcl_val er;
-	spcl_inst* c = spcl_inst_from_file(TEST_FNAME, &er, 0, NULL);
-	REQUIRE(er.type != VAL_ERR);
+	spcl_val v = spcl_inst_from_file(TEST_FNAME, 0, NULL);
+	REQUIRE(v.type != VAL_ERR);
 	//make sure that the function is there
-	spcl_val val_fun = spcl_find(c, "test_fun");
+	spcl_val val_fun = spcl_find(v.val.c, "test_fun");
 	CHECK(val_fun.type == VAL_FN);
 	//make sure that the number spcl_val a is there
-	spcl_val val_a = spcl_find(c, "a");
+	spcl_val val_a = spcl_find(v.val.c, "a");
 	REQUIRE(val_a.type == VAL_STR);
 	CHECK(strcmp(val_a.val.s, "a") == 0);
-	spcl_val val_b = spcl_find(c, "b");
+	spcl_val val_b = spcl_find(v.val.c, "b");
 	REQUIRE(val_b.type == VAL_STR);
 	CHECK(strcmp(val_b.val.s, "b") == 0);
 	//look at the returned instance
-	spcl_val val_c = spcl_find(c, "c");
+	spcl_val val_c = spcl_find(v.val.c, "c");
 	REQUIRE(val_c.type == VAL_INST);
 	spcl_inst* sub_c = val_c.val.c;
 	val_c = spcl_find(sub_c, "num");
@@ -1053,7 +1051,7 @@ TEST_CASE("spcl_inst parsing") {
 	val_c = spcl_find(sub_c, "__type__");
 	REQUIRE(val_c.type == VAL_STR);
 	CHECK(strcmp(val_c.val.s,"test_inst") == 0);
-	destroy_spcl_inst(c);
+	cleanup_spcl_val(&v);
     }
     SUBCASE ("stress test") {
 	//first we add a bunch of arbitrary variables to make searching harder for the parser
@@ -1185,6 +1183,8 @@ TEST_CASE("file parsing") {
     destroy_spcl_inst(c);
 }
 TEST_CASE("file importing") {
+    const char* targv[] = {"1", "--b1=0", "-r"};
+    size_t targc = sizeof(targv)/sizeof(char*);
     const char* lines1[] = {
 	"fn double = (n) {",
 	    "mul = 2;"
@@ -1196,47 +1196,51 @@ TEST_CASE("file importing") {
 	"import /tmp/lines1.spcl",
 	"a1 = double(1)",
 	"a2 = double(2)",
-	"a3 = double(3)" };
+	"a3 = double(3)",
+	"a4 = double(argv[0])" };
     size_t n_lines2 = sizeof(lines2)/sizeof(char*);
     write_test_file(lines2, n_lines2, "/tmp/lines2.spcl");
     spcl_val er;
-    spcl_inst* c = spcl_inst_from_file("/tmp/lines2.spcl", &er, 0, NULL);
+    spcl_val v = spcl_inst_from_file("/tmp/lines2.spcl", targc, targv);
+    CHECK(v.type == VAL_INST);
     int tmp;
-    CHECK(spcl_find_int(c, "a1", &tmp) >= 0);
+    CHECK(spcl_find_int(v.val.c, "a1", &tmp) >= 0);
     CHECK(tmp == 2);
-    CHECK(spcl_find_int(c, "a2", &tmp) >= 0);
+    CHECK(spcl_find_int(v.val.c, "a2", &tmp) >= 0);
     CHECK(tmp == 4);
-    CHECK(spcl_find_int(c, "a3", &tmp) >= 0);
+    CHECK(spcl_find_int(v.val.c, "a3", &tmp) >= 0);
     CHECK(tmp == 6);
-    destroy_spcl_inst(c);
+    CHECK(spcl_find_int(v.val.c, "a4", &tmp) >= 0);
+    CHECK(tmp == 2);
+    CHECK(spcl_find_int(v.val.c, "b1", &tmp) >= 0);
+    CHECK(tmp == 0);
+    CHECK(spcl_test(v.val.c, "argv[1] == \"r\""));
+    cleanup_spcl_val(&v);
 }
 
 TEST_CASE("benchmarks") {
     const size_t N_RUNS = 100;
     double times[N_RUNS];
     double mean, var;
-    spcl_val er;
     //run assertions
     for (size_t i = 0; i < N_RUNS; ++i) {
 	auto start = std::chrono::steady_clock::now();
-	spcl_inst* c = spcl_inst_from_file(TEST_ASSERT_NAME, &er, 0, NULL);
+	spcl_val v = spcl_inst_from_file(TEST_ASSERT_NAME, 0, NULL);
 	auto end = std::chrono::steady_clock::now();
 	times[i] = std::chrono::duration <double, std::milli> (end-start).count();
 	if (i == 0)
-	    CHECK(er.type == VAL_UNDEF);
-	cleanup_spcl_val(&er);
-	destroy_spcl_inst(c);
+	    CHECK(v.type == VAL_INST);
+	cleanup_spcl_val(&v);
     }
     mean_var(times, N_RUNS, &mean, &var);
     printf("assertions.spcl evaluated in %f\xc2\xb1%f ms\n", mean, sqrt(var));
     //run benchmarks
     for (size_t i = 0; i < N_RUNS; ++i) {
 	auto start = std::chrono::steady_clock::now();
-	spcl_inst* c = spcl_inst_from_file(TEST_BENCH_NAME, &er, 0, NULL);
+	spcl_val v = spcl_inst_from_file(TEST_BENCH_NAME, 0, NULL);
 	auto end = std::chrono::steady_clock::now();
 	times[i] = std::chrono::duration <double, std::milli> (end-start).count();
-	cleanup_spcl_val(&er);
-	destroy_spcl_inst(c);
+	cleanup_spcl_val(&v);
     }
     mean_var(times, N_RUNS, &mean, &var);
     printf("benchmark.spcl evaluated in %f\xc2\xb1%f ms\n", mean, sqrt(var));
