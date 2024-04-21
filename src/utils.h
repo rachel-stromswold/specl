@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #define BLK_MAX			16	//the maximum number of nested blocks
 #define LST_MAX			8	//the maximum number of nested lists for a flatten statement
@@ -9,7 +10,7 @@
 #define lengthof(s)   (countof(s) - 1)
 #define mkarr(a, t, n)  (t *)xrealloc(a, sizeof(t)*n)
 
-//this is a macro to initialize a dummy line_buffer named fs.
+//this is a macro to initialize a dummy line_buffer named fs->
 #define str_to_fs(str)				\
     spcl_fstream fs;				\
     fs.lines = alloca(sizeof(char*));		\
@@ -106,6 +107,27 @@ int TYPED3(STACK_PEEK,TYPE,N)(stack(TYPE,N)* s, size_t ind, TYPE* sto) {		\
  */
 #define peek(TYPE,N) TYPED3(STACK_PEEK,TYPE,N)
 
+//These functions work like malloc and realloc, but abort execution if allocation failed.
+static inline void* xmalloc(size_t n) {
+    void* ret = malloc(n);
+    if (!ret) {
+	fprintf(stderr, "Ran out of memory!\n");
+	exit(1);
+    }
+    return ret;
+}
+static inline void* xrealloc(void* p, size_t n) {
+    p = realloc(p, n);
+    if (!p) {
+	fprintf(stderr, "Ran out of memory!\n");
+	exit(1);
+    }
+    return p;
+}
+static inline void xfree(void* p) {
+    free(p);
+}
+
 /**
  * check if a character is whitespace
  */
@@ -200,3 +222,7 @@ static inline char* trim_whitespace(char* str, size_t* len) {
     if (len) *len = last_non + 1;
     return str;
 }
+
+/** ============================ for_state ============================ **/
+
+

@@ -2,9 +2,9 @@ center = 50
 norm_denom = 2*4^2
 dx = 0.1
 
-//math tests
+# math tests
 xs = range(0, 2*center, dx)
 ys = [math.exp(-(x-center)^2)/norm_denom for x in xs]
 ys[10] = 1
 dys_2 = [ys[i+1] - 2*ys[i] + ys[i-1] for i in range(1, len(xs)-1)]
-//print("g[50] = %, d^2 g[50] = %\n", ys[50], dys_2[50])
+# print("g[50] = %, d^2 g[50] = %\n", ys[50], dys_2[50])
