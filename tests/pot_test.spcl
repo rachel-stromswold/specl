@@ -1,0 +1,71 @@
+box_len = 100
+
+# convert from nm to simulation length units
+fn convert_len = (l) {
+    return l / box_len;
+}
+# convert from eV*ns^2/nm^2 to simulation mass units
+fn convert_mass = (m) {
+    return m / box_len^2;
+}
+
+fn ensemble = (p_num, p_mass, p_in_temp, p_e_per_bs) {
+    return {
+	__type__ = "ensemble";
+	num = p_num;
+	mass = convert_mass(p_mass);
+	in_temp = p_in_temp;
+	e_per_bs = p_e_per_bs;
+    }
+}
+
+fn lj_int = (r0, sigma, epsilon) {
+    # convert units;
+    r0 = convert_len(r0);
+    sigma = convert_len(sigma);
+
+    # convert r->R^2. Calculate the parameters A=4*epsilon*sigma^12, B = 4*epsilon*sigma^6, offset = A/R^12 - B/R^6;
+    sigma_6 = sigma^6;
+    a = 4*epsilon*(sigma_6^2);
+    b = 4*epsilon*sigma_6;
+    ene_0 = a/r0^12 - b/r0^6;
+    return {__type__ = "lj_int"; params = [r0^2, a, b, ene_0]};
+}
+
+# Create a quadropole trap
+# k: the steepness (in Gauss per nm) along the x and y axes. The z axis has a steepness 2*k.
+fn quad_pot = (p_k) {
+    return {__type__ = "quad_pot"; k = box_len/p_k}
+}
+
+# Create a Joffe-Pritchard trap
+# k: the steepness (in Gauss per nm) along the x and y axes. The z axis has a steepness 2*k.
+fn jp_pot = (p_k) {
+    return {__type__ = "jp_pot"; k = box_len/p_k^2}
+}
+
+fn hard_sphere_int = (r0, ene) {
+    return {__type__ = "hard_sphere_int"; params = [convert_len(r0)^2, ene]}
+}
+
+# Create a Gaussian update rule. Each Monte-Carlo iteration a random point is moved according to a Gaussian with standard deviation step_std
+fn gauss_update = (step_std) {
+    return {__type__ = "gauss_update"; params = [convert_len(step_std)]}
+}
+
+box_len = 2
+min_leaf_size = 2
+update=gauss_update(3)
+potential = quad_pot(4)
+interaction=hard_sphere_int(5, 6)
+rb_87=ensemble(7, 8, 9, vec(1/2,0,-1/2,-2,-1,0,1,2))
+
+assert(update.params[0] == 1.5);
+assert(potential.k == 0.5);
+assert(interaction.params[0] == 6.25);
+assert(interaction.params[1] == 6);
+
+box_len = 2
+potential = jp_pot(3)
+interaction = lj_int(1, 2, 3)
+rb_87 = ensemble(7, 8, 9, vec(1/2,0,-1/2,-2,-1,0,1,2))

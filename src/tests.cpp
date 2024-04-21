@@ -1224,6 +1224,12 @@ TEST_CASE("file importing") {
     cleanup_spcl_val(&v);
 }
 
+TEST_CASE("assertions") {
+    spcl_val v = spcl_inst_from_file(TEST_ASSERT_NAME, 0, NULL);
+    CHECK(v.type != VAL_ERR);
+    cleanup_spcl_val(&v);
+}
+
 TEST_CASE("benchmarks") {
     const size_t N_RUNS = 100;
     double times[N_RUNS];
@@ -1231,7 +1237,7 @@ TEST_CASE("benchmarks") {
     //run assertions
     for (size_t i = 0; i < N_RUNS; ++i) {
 	auto start = std::chrono::steady_clock::now();
-	spcl_val v = spcl_inst_from_file(TEST_ASSERT_NAME, 0, NULL);
+	spcl_val v = spcl_inst_from_file(TEST_BENCH_NAME, 0, NULL);
 	auto end = std::chrono::steady_clock::now();
 	times[i] = std::chrono::duration <double, std::milli> (end-start).count();
 	if (i == 0)
@@ -1239,15 +1245,15 @@ TEST_CASE("benchmarks") {
 	cleanup_spcl_val(&v);
     }
     mean_var(times, N_RUNS, &mean, &var);
-    printf("assertions.spcl evaluated in %f\xc2\xb1%f ms\n", mean, sqrt(var));
+    printf("benchmarks.spcl evaluated in %f\xc2\xb1%f ms\n", mean, sqrt(var));
     //run benchmarks
     for (size_t i = 0; i < N_RUNS; ++i) {
 	auto start = std::chrono::steady_clock::now();
-	spcl_val v = spcl_inst_from_file(TEST_BENCH_NAME, 0, NULL);
+	spcl_val v = spcl_inst_from_file(POT_TEST_NAME, 0, NULL);
 	auto end = std::chrono::steady_clock::now();
 	times[i] = std::chrono::duration <double, std::milli> (end-start).count();
 	cleanup_spcl_val(&v);
     }
     mean_var(times, N_RUNS, &mean, &var);
-    printf("benchmark.spcl evaluated in %f\xc2\xb1%f ms\n", mean, sqrt(var));
+    printf("pot_test.spcl evaluated in %f\xc2\xb1%f ms\n", mean, sqrt(var));
 }
