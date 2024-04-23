@@ -1193,8 +1193,8 @@ TEST_CASE("file importing") {
     size_t targc = sizeof(targv)/sizeof(char*);
     const char* lines1[] = {
 	"fn double = (n) {",
-	    "mul = 2;"
-	    "return mul*n;"
+	    "mul = 2;",
+	    "return mul*n;",
 	"}" };
     size_t n_lines1 = sizeof(lines1)/sizeof(char*);
     write_test_file(lines1, n_lines1, "/tmp/lines1.spcl");
@@ -1203,7 +1203,8 @@ TEST_CASE("file importing") {
 	"a1 = double(1)",
 	"a2 = double(2)",
 	"a3 = double(3)",
-	"a4 = double(argv[0])" };
+	"a4 = double(argv[0])",
+	"print(\"in file importing\", a1, a2, a3, a4)" };
     size_t n_lines2 = sizeof(lines2)/sizeof(char*);
     write_test_file(lines2, n_lines2, "/tmp/lines2.spcl");
     spcl_val er;

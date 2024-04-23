@@ -132,9 +132,9 @@ static inline lbi strchr_block_rs(const spcl_fstream* fs, lbi s, lbi e, char c) 
 	//now look for matches
 	if (cur == c && blk_stk.ptr == 0)
 	    return s;
-	if (cur == '(' || cur == '[' || cur == '{') {
+	if (cur == BEG_PAR || cur == BEG_SQR || cur == BEG_CRL) {
 	    if ( push(char,BLK_MAX)(&blk_stk, cur) ) return e;
-	} else if (cur == '}' || cur == ']' ||cur == ')') {
+	} else if (cur == END_CRL || cur == END_SQR ||cur == END_PAR) {
 	    if ( pop(char,BLK_MAX)(&blk_stk, &prev) || cur != get_match(prev) ) return e;
 	} else if (cur == '\"') {
 	    if (blk_stk.ptr != 0 && !peek(char,BLK_MAX)(&blk_stk, 1, &prev) && prev == '\"') {
@@ -183,9 +183,9 @@ static inline lbi token_block(const spcl_fstream* fs, lbi s, lbi e, const char* 
 	    if ( found && is_char_sep(fs_get(fs, fs_add(fs, s, cmp_len))) )
 		return s;
 	}
-	if (cur == '(' || cur == '[' || cur == '{') {
+	if (cur == BEG_PAR || cur == BEG_SQR || cur == BEG_CRL) {
 	    if ( push(char,BLK_MAX)(&blk_stk, cur) ) return e;
-	} else if (cur == '}' || cur == ']' || cur == ')') {
+	} else if (cur == END_CRL || cur == END_SQR || cur == END_PAR) {
 	    if ( pop(char,BLK_MAX)(&blk_stk, &prev)  || cur != get_match(prev) ) return e;
 	//comments use more then one character
 	} else if (prev == '/' && cur == '*') {
@@ -235,10 +235,7 @@ int lbicmp(lbi l, lbi r) {
 	return 1;
     return 0;
 }
-#if SPCL_DEBUG_LVL==0
-static inline
-#endif
-read_state make_read_state(const spcl_fstream* fs, lbi s, lbi e) {
+spcl_local read_state make_read_state(const spcl_fstream* fs, lbi s, lbi e) {
     read_state rs;
     rs.b = fs;
     rs.start = s;
@@ -345,10 +342,7 @@ void spcl_fstream_append(spcl_fstream* fs, const char* str) {
 }
 //Below are protected functions in fstream. They are not intended to be used by external libraries.
 
-#if SPCL_DEBUG_LVL<1
-static
-#endif
-char* fs_get_line(const spcl_fstream* fs, lbi b, lbi e, size_t* n) {
+spcl_local char* fs_get_line(const spcl_fstream* fs, lbi b, lbi e, size_t* n) {
     /*while (is_whitespace(fs_get(fs, b)))
 	b = fs_add(fs, b, 1);*/
     if (b.line >= fs->n_lines) {
@@ -370,10 +364,7 @@ char* fs_get_line(const spcl_fstream* fs, lbi b, lbi e, size_t* n) {
     if (n) *n = wi;
     return ret;
 }
-#if SPCL_DEBUG_LVL<1
-static inline
-#endif
-spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, lbi start, lbi end) {
+spcl_local spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, lbi start, lbi end) {
     //TODO: there seems to be a bug where multiple lines get folded in one. figure out why this happens.
     spcl_fstream* ret = alloc_fstream();
     if (!fs || fs->n_lines == 0 || lbicmp(start, end) >= 0) {
@@ -413,10 +404,7 @@ static inline const char* fs_read(const spcl_fstream* fs, lbi s) {
 	return "";
     return fs->lines[s.line]+s.off;
 }
-#if SPCL_DEBUG_LVL<1
-static
-#endif
-char* fs_flatten(const spcl_fstream* fs, char sep_char, size_t* len) {
+spcl_local char* fs_flatten(const spcl_fstream* fs, char sep_char, size_t* len) {
     //figure out how much memory must be allocated
     size_t tot_size = 1;
     for (size_t i = 0; i < fs->n_lines; ++i)
@@ -998,7 +986,7 @@ char* spcl_stringify(spcl_val v, char* buf, size_t n) {
 	return stpncpy(buf, v.val.s, n);
     } else if (v.type == VAL_ARRAY) {
 	size_t off = 1;
-	buf[0] = '{';//}
+	buf[0] = BEG_CRL;//}
 	for (size_t i = 0; i < v.n_els; ++i) {
 	    size_t rem = n-off;
 	    if (rem > MAX_NUM_SIZE)
@@ -1017,7 +1005,7 @@ char* spcl_stringify(spcl_val v, char* buf, size_t n) {
 		buf[off++] = ',';
 	}
 	if (off >= 0 && off < n)
-	    buf[off++] = '}';
+	    buf[off++] = END_CRL;
 	buf[off] = 0;
 	return buf+off;
     } else if (v.type == VAL_NUM) {
@@ -1031,7 +1019,7 @@ char* spcl_stringify(spcl_val v, char* buf, size_t n) {
 	return buf+(size_t)tmp;
     } else if (v.type == VAL_LIST) {
 	char* cur = buf+1;
-	buf[0] = '[';
+	buf[0] = BEG_SQR;
 	size_t elsize = (v.n_els >= MAX_PRINT_ELS)? n/MAX_PRINT_ELS - 5: n/v.n_els - 2;
 	if (elsize < 3) {
 	    return stpncpy(buf, "[...]", strlen("[...]"));
@@ -1043,7 +1031,7 @@ char* spcl_stringify(spcl_val v, char* buf, size_t n) {
 	    if (i == MAX_PRINT_ELS)
 		return stpncpy(cur, "...]", strlen("...]"));
 	}
-	*cur++ = ']';
+	*cur++ = END_SQR;
 	return cur;
     } else if (v.type < N_VALTYPES) { 
 	int tmp = snprintf(buf, n, "<%s at %p>", valnames[v.type], v.val.s);
@@ -1212,66 +1200,7 @@ static inline int matrix_err(spcl_val* l, size_t i) {
     *l = tmp;
     return 1;
 }
-
-#if SPCL_DEBUG_LVL>0
-static inline void print_spaces(FILE* f, size_t n) {
-    for (size_t i = 0; i < n; ++i)
-	fprintf(f, " |");
-}
-void print_hierarchy(spcl_val v, FILE* f, size_t depth) {
-    if (f == NULL)
-	f = stdout;
-    //print the left tree view thingie
-    print_spaces(f, depth);
-    //now we handle all of the simple (non-recursive) prints
-    if (v.type == VAL_UNDEF) {
-	fprintf(f, "UNDEFINED\n");
-    } else if (v.type == VAL_NUM) {
-	fprintf(f, "%f\n", v.val.x);
-    } else if (v.type == VAL_STR) {
-	fprintf(f, "\"%s\"\n", v.val.s);
-    } else if (v.type == VAL_FN) {
-	fprintf(f, "%p\n", v.val.f);
-    //now handle all the recursive prints
-    } else if (v.type == VAL_LIST) {
-	fprintf(f, "[+\n"/*]*/);
-	for (size_t i = 0; i < v.n_els; ++i)
-	    print_hierarchy(v.val.l[i], f, depth+1);
-	print_spaces(f, depth);
-	fprintf(f, /*[*/"]\n");
-    } else if (v.type == VAL_ARRAY) {
-	fprintf(f, "([+\n"/*])*/);
-	for (size_t i = 0; i < v.n_els; ++i) {
-	    print_spaces(f, depth+2);
-	    fprintf(f, "|%f\n", v.val.a[i]);
-	}
-	print_spaces(f, depth+1);
-	fprintf(f, /*([*/"])\n");
-    } else if (v.type == VAL_INST) {
-	fprintf(f, "{+\n"/*}*/);
-	for (size_t i = con_it_next(v.val.c, 0); i < con_size(v.val.c); i = con_it_next(v.val.c, i+1)) {
-	    name_val_pair pair = v.val.c->table[i];
-	    print_spaces(f, depth+1);
-	    fprintf(f, "%s:", pair.s);
-	    //use space economically for simple types
-	    if (pair.v.type == VAL_LIST || pair.v.type == VAL_ARRAY || pair.v.type == VAL_INST) {
-		fprintf(f, " -V\n");
-		print_hierarchy(pair.v, f, depth+1);
-	    } else {
-		fprintf(f, " ");
-		print_hierarchy(pair.v, f, 0);
-	    }
-	}
-	print_spaces(f, depth);
-	fprintf(f, /*{*/"}\n");
-    }
-}
-#endif
-
-#if SPCL_DEBUG_LVL<1
-static
-#endif
-void val_add(spcl_val* l, spcl_val r) {
+spcl_local void val_add(spcl_val* l, spcl_val r) {
     if (l->type == VAL_UNDEF && r.type == VAL_NUM) {
 	*l = r;
     } else if (l->type == VAL_NUM && r.type == VAL_NUM) {
@@ -1318,11 +1247,7 @@ void val_add(spcl_val* l, spcl_val r) {
 	*l = spcl_make_err(E_BAD_TYPE, "cannot add types %s and %s", valnames[l->type], valnames[r.type]);
     }
 }
-
-#if SPCL_DEBUG_LVL<1
-static
-#endif
-void val_sub(spcl_val* l, spcl_val r) {
+spcl_local void val_sub(spcl_val* l, spcl_val r) {
     if (l->type == VAL_UNDEF && r.type == VAL_NUM) {
 	*l = spcl_make_num(-r.val.x);
     } else if (l->type == VAL_NUM && r.type == VAL_NUM) {
@@ -1356,11 +1281,7 @@ void val_sub(spcl_val* l, spcl_val r) {
 	*l = spcl_make_err(E_BAD_TYPE, "cannot subtract types %s and %s", valnames[l->type], valnames[r.type]);
     }
 }
-
-#if SPCL_DEBUG_LVL<1
-static
-#endif
-void val_mul(spcl_val* l, spcl_val r) {
+spcl_local void val_mul(spcl_val* l, spcl_val r) {
     if (l->type == VAL_NUM && r.type == VAL_NUM) {
 	*l = spcl_make_num( (l->val.x)*(r.val.x) );
     } else if (l->type == VAL_ARRAY && r.type == VAL_ARRAY) {
@@ -1401,11 +1322,7 @@ void val_mul(spcl_val* l, spcl_val r) {
 	*l = spcl_make_err(E_BAD_TYPE, "cannot multiply types %s and %s", valnames[l->type], valnames[r.type]);
     }
 }
-
-#if SPCL_DEBUG_LVL<1
-static
-#endif
-void val_div(spcl_val* l, spcl_val r) {
+spcl_local void val_div(spcl_val* l, spcl_val r) {
     if (l->type == VAL_NUM && r.type == VAL_NUM) {
 	*l = spcl_make_num( (l->val.x)/(r.val.x) );
     } else if (l->type == VAL_ARRAY && r.type == VAL_ARRAY) {
@@ -1446,11 +1363,7 @@ void val_div(spcl_val* l, spcl_val r) {
 	*l = spcl_make_err(E_BAD_TYPE, "cannot divide types %s and %s", valnames[l->type], valnames[r.type]);
     }
 }
-
-#if SPCL_DEBUG_LVL<1
-static
-#endif
-void val_mod(spcl_val* l, spcl_val r) {
+spcl_local void val_mod(spcl_val* l, spcl_val r) {
     if (l->type == VAL_NUM && r.type == VAL_NUM) {
 	double div = l->val.x / r.val.x;
 	l->val.x -= floor(div)*r.val.x;
@@ -1498,10 +1411,7 @@ void val_mod(spcl_val* l, spcl_val r) {
     }
 }
 
-#if SPCL_DEBUG_LVL<1
-static
-#endif
-void val_exp(spcl_val* l, spcl_val r) {
+spcl_local void val_exp(spcl_val* l, spcl_val r) {
     if (l->type == VAL_NUM && r.type == VAL_NUM) {
 	*l = spcl_make_num( pow(l->val.x, r.val.x) );
     } else if (l->type == VAL_ARRAY && r.type == VAL_ARRAY) {
@@ -1717,7 +1627,7 @@ static const int OP2_PRECS[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
 /**
  * Find the length of an operator sequence e.g. '==', '=', '+=' etc.
  */
-static inline int get_oplen(char op, char next) {
+static inline int get_oplen(u8 op, u8 next) {
     //return 0 if the character isn't an operator
     if (op < 0 || op > MAX_ASCII || (OP1_PRECS[op] == 0 && OP2_PRECS[op] == 0))
 	return 0;
@@ -1736,15 +1646,11 @@ static inline int get_oplen(char op, char next) {
     }
     return op == ':';
 }
-
-#if SPCL_DEBUG_LVL==0
-static inline
-#endif
 /**
  * Identify the keyword starting at rs->start up to rs->end. If a key is found, then rs->start is updated to the first character after the keyword.
  * returns: the spck_key code for the matched key.
  */
-spcl_key get_keyword(read_state* rs) {
+spcl_local spcl_key get_keyword(read_state* rs) {
     skip_ws(rs, 0);
     //identify keywords. All keywords, except "fn", must come at the start of a parsed value or they are invalid. There is an exception for "fn" since foo = fn(bar) {...} is a valid expression. However, even in this case, "fn" will start the expression after handling the next operator.
     const char* expr = fs_read(rs->b, rs->start);
@@ -1768,17 +1674,14 @@ spcl_key get_keyword(read_state* rs) {
  * close_ind: store the location of the last escaping block
  * returns: the index of the first expression or 0 in the event of an error (it is impossible for a valid expression to have an operator as the first character)
  */
-#if SPCL_DEBUG_LVL==0
-static inline
-#endif
-spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind, lbi* new_end) {
+spcl_local spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind, lbi* new_end) {
     *op_loc = rs.end;
     *open_ind = rs.end;*close_ind = rs.end;
     //keeps track of open and close [], (), {}, and ""
     stack(char,BLK_MAX) blk_stk = make_stack(char,BLK_MAX)();
     //variable names are not allowed to start with '+', '-', or a digit and may not contain any '.' symbols. Use this to check whether the spcl_val is numeric
-    char open_type, prev;
-    char cur = fs_get(rs.b, rs.start);
+    u8 open_type, prev;
+    u8 cur = fs_get(rs.b, rs.start);
     int is_num = ((cur >= '0' && cur <= '9') || cur == '.');
 
     //keep track of the precedence of the orders of operation (lower means executed later) ">,=,>=,==,<=,<"=4 "+,-"=3, "*,/"=2, "**"=1
@@ -1790,13 +1693,13 @@ spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind
 	prev = cur;
 	cur = fs_get(rs.b, rs.start);
 	char next = fs_get(rs.b, fs_add(rs.b, rs.start, 1));
-	if (cur == '(' || cur == '{' || cur == '[') {
+	if (cur == BEG_PAR || cur == BEG_CRL || cur == BEG_SQR) {
 	    //if we've already found an entire block we can stop
 	    if (blk_stk.ptr == 0 && lbicmp(*open_ind, rs.end) < 0) break;
 	    push(char,BLK_MAX)(&blk_stk, cur);
 	    //only set the open index if this is the first match
 	    if (lbicmp(*open_ind, rs.end) == 0) *open_ind = rs.start;
-	} else if (cur == ']' || cur == ')' || cur == '}') {
+	} else if (cur == END_SQR || cur == END_PAR || cur == END_CRL) {
 	    if (pop(char,BLK_MAX)(&blk_stk, &open_type) || cur != get_match(open_type)) {
 		destroy_stack(char,BLK_MAX)(&blk_stk, NULL);
 		return spcl_make_err(E_BAD_SYNTAX, "unexpected %c", cur);
@@ -1887,7 +1790,7 @@ static inline spcl_val _spcl_index(spcl_val v, spcl_val ind, spcl_val* assign) {
  */
 static inline spcl_val spcl_find_rs(const spcl_inst* c, read_state rs) {
     lbi dot_loc = strchr_block_rs(rs.b, rs.start, rs.end, '.');
-    lbi ref_loc = strchr_block_rs(rs.b, rs.start, rs.end, '[');//]
+    lbi ref_loc = strchr_block_rs(rs.b, rs.start, rs.end, BEG_SQR);//]
     if (!lbicmp(dot_loc, rs.end) && !lbicmp(ref_loc, rs.end)) {
 	//if there was neither a period or open brace, just lookup directly
 	size_t i, n;
@@ -1912,9 +1815,9 @@ static inline spcl_val spcl_find_rs(const spcl_inst* c, read_state rs) {
 	return spcl_find_rs(sub_con.val.c, make_read_state(rs.b, fs_add(rs.b,dot_loc,1), rs.end));
     } else {
 	//access lists/arrays
-	lbi close_ind = strchr_block_rs(rs.b, fs_add(rs.b, ref_loc, 1), rs.end, /*[*/']');
+	lbi close_ind = strchr_block_rs(rs.b, fs_add(rs.b, ref_loc, 1), rs.end, END_SQR);
 	if (lbicmp(close_ind, rs.end) > 0)
-	    return spcl_make_err(E_BAD_SYNTAX, /*[*/"expected ']'");
+	    return spcl_make_err(E_BAD_SYNTAX, "expected %c", END_SQR);
 	//read the list and the index
 	spcl_val lst = spcl_find_rs(c, make_read_state(rs.b, rs.start, ref_loc));
 	spcl_val index = spcl_parse_line_rs(c, make_read_state(rs.b, fs_add(rs.b, ref_loc, 1), close_ind), NULL, KEY_NONE);
@@ -1926,7 +1829,7 @@ static inline spcl_val spcl_find_rs(const spcl_inst* c, read_state rs) {
  */
 static inline spcl_val set_spcl_val_rs(struct spcl_inst* c, read_state rs, spcl_val p_val) {
     lbi dot_loc = strchr_block_rs(rs.b, rs.start, rs.end, '.');
-    lbi ref_loc = strchr_block_rs(rs.b, rs.start, rs.end, '[');//]
+    lbi ref_loc = strchr_block_rs(rs.b, rs.start, rs.end, BEG_SQR);//]
     //if there are no dereferences, just access the table directly
     if (!lbicmp(dot_loc, rs.end) && !lbicmp(ref_loc, rs.end)) {
 	const char* str = fs_read(rs.b, rs.start);
@@ -1940,9 +1843,9 @@ static inline spcl_val set_spcl_val_rs(struct spcl_inst* c, read_state rs, spcl_
 	return set_spcl_val_rs(sub_con.val.c, make_read_state(rs.b, fs_add(rs.b, dot_loc, 1), rs.end), p_val);
     } else {
 	//access lists/arrays
-	lbi close_ind = strchr_block_rs(rs.b, fs_add(rs.b, ref_loc, 1), rs.end, /*[*/']');
+	lbi close_ind = strchr_block_rs(rs.b, fs_add(rs.b, ref_loc, 1), rs.end, END_SQR);
 	if (lbicmp(close_ind, rs.end) > 0)
-	    return spcl_make_err(E_BAD_SYNTAX, /*[*/"expected ']'");
+	    return spcl_make_err(E_BAD_SYNTAX, "expected %c", END_SQR);
 	//read the list and the index
 	spcl_val lst = spcl_find_rs(c, make_read_state(rs.b, rs.start, ref_loc));
 	spcl_val index = spcl_parse_line_rs(c, make_read_state(rs.b, fs_add(rs.b, ref_loc, 1), close_ind), NULL, KEY_NONE);
@@ -1951,10 +1854,7 @@ static inline spcl_val set_spcl_val_rs(struct spcl_inst* c, read_state rs, spcl_
     return spcl_make_none();
 }
 //TODO: to inline or not to inline
-#if SPCL_DEBUG_LVL<1
-static
-#endif
-spcl_val do_op(spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end, spcl_key key) {
+spcl_local spcl_val do_op(spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end, spcl_key key) {
     spcl_val sto = spcl_make_none();
     //some operators (==, >=, <=) take up more than one character, test for these
     char op = fs_get(rs.b, op_loc);
@@ -1996,6 +1896,11 @@ spcl_val do_op(spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end, spcl_key k
 	if (tmp_val.type == VAL_ERR)
 	    return tmp_val;
 	set_spcl_val_rs(c, rs_l, tmp_val);
+	//this is a super ugly hack to make function names appear in debugging info
+	//TODO: this entire thing needs to be refactored into a buffer of tokens
+	if (tmp_val.type == VAL_FN) {
+	    tmp_val.val.f->call_sig.name = fs_read(rs.b, rs_l.start);
+	}
 	return spcl_make_none();
     }
     //parse right and left spcl_vals. Note that we don't pass the key since we must do type checking after the operation completes
@@ -2074,7 +1979,7 @@ static inline for_state* make_for_state(spcl_inst* c, read_state rs, lbi for_sta
     fs->for_start = for_start;
     fs->in_start = token_block(rs.b, after_for, rs.end, "in", strlen("in"));
     if (!lbicmp(fs->in_start, rs.end)) {
-	*er = spcl_make_err(E_BAD_SYNTAX, "expected keyword in");
+	*er = spcl_make_err(E_BAD_SYNTAX, "expected keyword 'in'");
 	return fs;
     }
     //the variable name is whatever is in between the "for" and the "in"
@@ -2414,9 +2319,9 @@ static inline spcl_val spcl_parse_line_rs(struct spcl_inst* c, read_state rs, lb
 	    //if there are enclosed blocks then we need to read those
 	    switch (fs_get(rs.b, open_ind)) {
 	    case '\"': sto.type = VAL_STR; sto.val.s = fs_get_line(rs.b, fs_add(rs.b, open_ind, 1), close_ind, &sto.n_els);sto.n_els += 1;break; //"
-	    case '[':  sto = (is_var)? copy_spcl_val(spcl_find_rs(c, rs)) : parse_literal_list(c, rs, open_ind, close_ind);break; //]
-	    case '{':  sto = parse_literal_table(c, rs, open_ind, close_ind);break; //}
-	    case '(':  sto = parse_literal_fn(c, start_key, rs, open_ind, close_ind, new_end);break; //)
+	    case BEG_SQR:  sto = (is_var)? copy_spcl_val(spcl_find_rs(c, rs)) : parse_literal_list(c, rs, open_ind, close_ind);break; //]
+	    case BEG_CRL:  sto = parse_literal_table(c, rs, open_ind, close_ind);break; //}
+	    case BEG_PAR:  sto = parse_literal_fn(c, start_key, rs, open_ind, close_ind, new_end);break; //)
 	    }
 	}
     } else {
@@ -2576,19 +2481,20 @@ static inline spcl_val get_block(spcl_key k, read_state* rs) {
 	    return v;
 	if (lbicmp(open_ind, rs->end) >= 0) {
 	    //we only accept single line blocks if there was a perenthesis that produces a well defined end and the statement is not a function.
-	    if (open_char != '(' || k == KEY_FN)//)
+	    if (open_char != BEG_PAR || k == KEY_FN)//)
 		return spcl_make_err(E_BAD_SYNTAX, "expected a block enclosed by {...} after keyword %s", spcl_keywords[k]);
 	    return spcl_make_num(0);
 	}
 	open_char = fs_get(rs->b, open_ind);
-	if (open_char == '{'/*}*/) {
+	if (open_char == BEG_CRL) {
 	    rs->start = fs_add(rs->b, open_ind, 1);
 	    rs->end = close_ind;
 	    return spcl_make_num(1);
 	}
 	//move the block forward
 	rs->start = fs_add(rs->b, close_ind, 1);
-	rs->end = make_lbi(rs->start.line, rs->b->line_sizes[rs->start.line]);
+	//rs->end = make_lbi(rs->start.line, rs->b->line_sizes[rs->start.line]);
+	rs->end = fs_end(rs->b);
     }
     return spcl_make_err(E_BAD_SYNTAX, "something that should be impossible happened! congratulations!");
 }
@@ -2600,7 +2506,8 @@ spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b) {
 
     //iterate over each line in the file
     while (lbicmp(rs.start, fs_end(rs.b)) < 0) {
-	rs.end = make_lbi(rs.start.line, b->line_sizes[rs.start.line]);
+	//rs.end = make_lbi(rs.start.line, b->line_sizes[rs.start.line]);
+	rs.end = fs_end(b);
 
 	//look for keywords at the start of a line. If fast-forwarding takes us to a newline, then this string was empty unless there was a keyword.
 	spcl_key start_key = get_keyword(&rs);
@@ -2612,11 +2519,16 @@ spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b) {
 	} else if (start_key == KEY_IMPORT) {
 	    while (is_whitespace(fs_get(rs.b, rs.start)))
 		rs.start = fs_add(rs.b, rs.start, 1);
-	    spcl_fstream* fs = make_spcl_fstreamn(fs_read(rs.b, rs.start), fs_diff(rs.b, rs.end, rs.start));
+	    //TODO: allow enclosed quotes for files with whitespace
+	    char* name = fs_read(rs.b, rs.start);
+	    size_t name_len = (size_t)(strchr(name, '\n') - name);
+	    spcl_fstream* fs = make_spcl_fstreamn(name,  name_len);
 	    if (!fs)
 		return spcl_make_err(E_BAD_VALUE, "couldn't open file %s", fs_read(rs.b, rs.start));
 	    ret = spcl_read_lines(c, fs);
-	    end = rs.end;
+	    //set the end to the last character in the line
+	    end.line = rs.start.line;
+	    end.off = rs.start.off + name_len;
 	/*TODO: if, else, for, and while
 	 * } else if (start_key == KEY_IF) {
 	    ret = get_block(start_key, &rs, &open_ind, &close_ind);*/
@@ -2678,7 +2590,7 @@ spcl_val spcl_inst_from_file(const char* fname, int argc, const char** argv) {
 		    //we have to put the close quote around flags
 		    if (is_flag)
 			tmp_str[j++] = '\"';
-		    tmp_str[j++] = (i+1 < argc) ? ',' : ']';
+		    tmp_str[j++] = (i+1 < argc) ? ',' : END_SQR;
 		    break;
 		}
 		tmp_str[j++] = argv[i][k];
@@ -2737,7 +2649,7 @@ static inline spcl_uf* make_spcl_uf_rs(read_state rs, lbi* arg_inds, size_t n_ar
     lbi args_end = fs_add(rs.b, arg_inds[n_args], 1);
     while (is_whitespace(fs_get(rs.b, args_end)))
 	args_end = fs_add(rs.b, args_end, 1);
-    if (fs_get(rs.b, args_end) != '{') {
+    if (fs_get(rs.b, args_end) != BEG_CRL) {
 	if (er) *er = spcl_make_err(E_BAD_SYNTAX, "unexpected %c", fs_get(rs.b, args_end));//}
 	return NULL;
     }//}

@@ -4,7 +4,6 @@
 #include <errno.h>
 #include <math.h>
 #include <stdarg.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -27,6 +26,12 @@
 //we grow the hash table when the load factor (number of occupied slots/total slots) is greater than GROW_LOAD_NUM/GROW_LOAD_DEN
 #define GROW_LOAD_NUM		4
 #define GROW_LOAD_DEN		5
+
+#if SPCL_DEBUG_LVL<1
+#define scpl_local static inline
+#else
+#define spcl_local
+#endif
 
 //forward declarations
 struct spcl_val;
