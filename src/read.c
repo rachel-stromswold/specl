@@ -4,14 +4,20 @@
 #if SPCL_DEBUG_LVL==0
 typedef enum { KEY_NONE, KEY_IMPORT, KEY_CLASS, KEY_IF, KEY_FOR, KEY_ELSE, KEY_WHILE, KEY_BREAK, KEY_CONT, KEY_RET, KEY_FN, SPCL_N_KEYS } spcl_key;
 #endif
-static const char* spcl_keywords[SPCL_N_KEYS] = {"", "import", "class", "if", "for", "else", "while", "break", "continue", "return", "fn"};
+static s8 spcl_keywords[SPCL_N_KEYS] = {s8(" "), s8("import"), s8("class"), s8("if"), s8("for"), s8("else"), s8("while"), s8("break"), s8("continue"), s8("return"), s8("fn")};
 static const char* const errnames[N_ERRORS] =
-{"SUCCESS", "NO_FILE", "LACK_TOKENS", "BAD_SYNTAX", "BAD_VALUE", "BAD_TYPE", "NOMEM", "NAN", "UNDEF", "OUT_OF_BOUNDS", "ASSERT"};
+{"SUCCESS", "NO_FILE", "LACK_TOKENS", "BAD_SYNTAX", "BAD_VALUE", "BAD_TYPE", "NOMEM", "NAN", "UNDEFINED_TOKEN", "OUT_OF_BOUNDS", "ASSERT"};
 static const char* const valnames[N_VALTYPES] = {"none", "error", "numeric", "string", "array", "list", "fn", "obj"};
 
 //dumb forward declarations
 static inline lbi fs_end(const spcl_fstream* fs) {
     return make_lbi(fs->n_lines, 0);
+}
+//get the index of the last character in the filestream fs that has the line s
+static inline lbi fs_line_end(const spcl_fstream* fs, lbi s) {
+    if (!fs || s.line >= fs->n_lines)
+	return make_lbi(0,0);
+    return make_lbi(s.line, fs->line_sizes[s.line]);
 }
 /**
  * move the line buffer forward by one character
@@ -399,10 +405,10 @@ spcl_local spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, lbi start, lbi 
     }
     return ret;
 }
-static inline const char* fs_read(const spcl_fstream* fs, lbi s) {
+spcl_local s8 fs_read(const spcl_fstream* fs, lbi s, lbi e) {
     if (s.line >= fs->n_lines || s.off >= fs->line_sizes[s.line])
-	return "";
-    return fs->lines[s.line]+s.off;
+	return (s8){NULL, 0};
+    return (s8){fs->lines[s.line]+s.off, fs_diff(fs, e, s)};
 }
 spcl_local char* fs_flatten(const spcl_fstream* fs, char sep_char, size_t* len) {
     //figure out how much memory must be allocated
@@ -446,14 +452,14 @@ void cleanup_spcl_fn_call(spcl_fn_call* f) {
 	    cleanup_spcl_val(f->args + i);
     }
 }
-spcl_fn_call copy_spcl_fn_call(const spcl_fn_call o) {
-    spcl_fn_call f;f.name = NULL;
+/*spcl_fn_call copy_spcl_fn_call(const spcl_fn_call o) {
+    spcl_fn_call f = (spcl_fn_call){0};
     if (o.name) f.name = strdup(o.name);
     f.n_args = o.n_args;
     for (size_t i = 0; i < f.n_args; ++i)
 	f.args[i] = copy_spcl_val(o.args[i]);
     return f;
-}
+}*/
 
 /** ======================================================== name_val_pair ======================================================== **/
 
@@ -474,19 +480,19 @@ spcl_val get_sigerr(spcl_fn_call f, size_t min_args, size_t max_args, const valt
     if (!sig || max_args < min_args)
 	return spcl_make_none();
     if (f.n_args < min_args)
-	return spcl_make_err(E_LACK_TOKENS, "%s expected %lu arguments, got %lu", f.name, min_args, f.n_args);
+	return spcl_make_err(E_LACK_TOKENS, "%.*s expected %lu arguments, got %lu", f.name.n, f.name.s, min_args, f.n_args);
     if (f.n_args > max_args)
-	return spcl_make_err(E_LACK_TOKENS, "%s with too many arguments, %lu", f.name, f.n_args);
+	return spcl_make_err(E_LACK_TOKENS, "%.*s with too many arguments, %lu", f.name.n, f.name.s, f.n_args);
     for (size_t i = 0; i < f.n_args; ++i) {
 	//treat undefined as allowing for arbitrary type
 	if (sig[i] && f.args[i].type != sig[i]) {
 	    //if the type is an error, let it pass through
 	    if (f.args[i].type == VAL_ERR)
 		return f.args[i];
-	    return spcl_make_err(E_BAD_TYPE, "%s expected args[%lu].type=%s, got %s", f.name, i, valnames[sig[i]], valnames[f.args[i].type]);
+	    return spcl_make_err(E_BAD_TYPE, "%.*s expected args[%lu].type=%s, got %s", f.name.n, f.name.s, i, valnames[sig[i]], valnames[f.args[i].type]);
 	}
 	if (sig[i] > VAL_NUM && f.args[i].val.s == NULL)
-	    return spcl_make_err(E_BAD_TYPE, "%s found empty %s at args[%lu]", f.name, valnames[sig[i]], i);
+	    return spcl_make_err(E_BAD_TYPE, "%.*s found empty %s at args[%lu]", f.name.n, f.name.s, valnames[sig[i]], i);
     }
     return spcl_make_none();
 }
@@ -859,6 +865,7 @@ spcl_val spcl_make_err(parse_ercode code, const char* format, ...) {
     ret.type = VAL_ERR;
     //a nomemory error obviously won't be able to allocate any more memory
     if (code == E_NOMEM) {
+	fprintf(stderr, "kernel panic: out of memory!\n");
 	ret.val.e = NULL;
 	return ret;
     }
@@ -1627,7 +1634,7 @@ static const int OP2_PRECS[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
 /**
  * Find the length of an operator sequence e.g. '==', '=', '+=' etc.
  */
-static inline int get_oplen(u8 op, u8 next) {
+static inline int get_oplen(unsigned char op, unsigned char next) {
     //return 0 if the character isn't an operator
     if (op < 0 || op > MAX_ASCII || (OP1_PRECS[op] == 0 && OP2_PRECS[op] == 0))
 	return 0;
@@ -1653,15 +1660,18 @@ static inline int get_oplen(u8 op, u8 next) {
 spcl_local spcl_key get_keyword(read_state* rs) {
     skip_ws(rs, 0);
     //identify keywords. All keywords, except "fn", must come at the start of a parsed value or they are invalid. There is an exception for "fn" since foo = fn(bar) {...} is a valid expression. However, even in this case, "fn" will start the expression after handling the next operator.
-    const char* expr = fs_read(rs->b, rs->start);
-    size_t chn = fs_diff(rs->b, rs->end, rs->start);
+    s8 expr = fs_read(rs->b, rs->start, rs->end);
+    size chn = expr.n;
     for (spcl_key i = 1; i < SPCL_N_KEYS; ++i) {
-	size_t keylen = strlen(spcl_keywords[i]);
-	if (chn > keylen && memcmp(expr, spcl_keywords[i], keylen) == 0) {
-	    //if its a keyword then we don't need to bother checking the first keylen characters
-	    rs->start = fs_add(rs->b, rs->start, keylen);
-	    skip_ws(rs, 0);
-	    return i;
+	//only do a comparison if we have enough bytes
+	if (chn >= spcl_keywords[i].n) {
+	    //before we do a comparison we must use the same number of bytes
+	    expr.n = spcl_keywords[i].n;
+	    if (s8cmp(expr, spcl_keywords[i]) == 0) {
+		rs->start = fs_add(rs->b, rs->start, spcl_keywords[i].n);
+		skip_ws(rs, 0);
+		return i;
+	    }
 	}
     }
     return KEY_NONE;
@@ -1727,17 +1737,17 @@ spcl_local spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi
 		*close_ind = rs.end;
 	    }
 	    if (oplen >= 2) {
-		if (op_prec < OP2_PRECS[cur]) {
+		if (op_prec < OP2_PRECS[(unsigned char)cur]) {
 		    *op_loc = rs.start;
-		    op_prec = OP2_PRECS[cur];
+		    op_prec = OP2_PRECS[(unsigned char)cur];
 		}
 		rs.start = fs_add(rs.b, rs.start, oplen-1);	
-	    } else if (oplen == 1 && op_prec < OP1_PRECS[cur]) {
+	    } else if (oplen == 1 && op_prec < OP1_PRECS[(unsigned char)cur]) {
 		//avoid matches with numeric literals
-		if (OP1_PRECS[cur] == OP1_PRECS['-'] && is_num && (prev == 'e' || prev == 'E'))
+		if (OP1_PRECS[(unsigned char)cur] == OP1_PRECS['-'] && is_num && (prev == 'e' || prev == 'E'))
 		    continue;
 		*op_loc = rs.start;
-		op_prec = OP1_PRECS[cur];
+		op_prec = OP1_PRECS[(unsigned char)cur];
 	    } else if (!cur || cur == ';' || cur == '\n' || cur == '#') {
 		break;
 	    }
@@ -1832,8 +1842,8 @@ static inline spcl_val set_spcl_val_rs(struct spcl_inst* c, read_state rs, spcl_
     lbi ref_loc = strchr_block_rs(rs.b, rs.start, rs.end, BEG_SQR);//]
     //if there are no dereferences, just access the table directly
     if (!lbicmp(dot_loc, rs.end) && !lbicmp(ref_loc, rs.end)) {
-	const char* str = fs_read(rs.b, rs.start);
-	spcl_set_valn(c, str, fs_diff(rs.b, rs.end, rs.start), p_val, 0);
+	s8 str = fs_read(rs.b, rs.start, rs.end);
+	spcl_set_valn(c, str.s, str.n, p_val, 0);
 	return p_val;
     } else if (lbicmp(dot_loc, ref_loc) < 0) {
 	//access spcl_inst members
@@ -1899,7 +1909,7 @@ spcl_local spcl_val do_op(spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end,
 	//this is a super ugly hack to make function names appear in debugging info
 	//TODO: this entire thing needs to be refactored into a buffer of tokens
 	if (tmp_val.type == VAL_FN) {
-	    tmp_val.val.f->call_sig.name = fs_read(rs.b, rs_l.start);
+	    //tmp_val.val.f->call_sig.name = fs_read( rs.b, rs_l.start, rs_l.end );
 	}
 	return spcl_make_none();
     }
@@ -2152,7 +2162,7 @@ static inline spcl_val inds_to_nvp(spcl_inst* c, const spcl_fstream* fs, name_va
     *n = j;
     return spcl_make_none();
 }
-static inline spcl_uf* make_spcl_uf_rs(read_state rs, lbi* arg_inds, size_t n_args, lbi* new_end, spcl_val* er);
+static inline spcl_val spcl_make_fn_rs(read_state rs, lbi* arg_inds, size_t n_args, lbi* new_end);
 //parse function definition/call statements
 static inline spcl_val parse_literal_fn(struct spcl_inst* c, spcl_key key, read_state rs, lbi open_ind, lbi close_ind, lbi* new_end) {
     //check if this is a parenthetical expression
@@ -2179,20 +2189,16 @@ static inline spcl_val parse_literal_fn(struct spcl_inst* c, spcl_key key, read_
     lbi s = find_token_before(rs.b, open_ind, rs.start);
     if (s.line != open_ind.line)
 	return spcl_make_err(E_BAD_SYNTAX, "unexpected line break");
-    f.name = fs_read(rs.b, s);
+    f.name = fs_read(rs.b, s, open_ind);
     //check if this is a declaration
     if (key == KEY_FN) {
 	//parse the function and check for errors
-	sto.val.f = make_spcl_uf_rs(rs, arg_inds, f.n_args, new_end, &sto);
+	sto = spcl_make_fn_rs(rs, arg_inds, f.n_args, new_end);
 	xfree(arg_inds);
-	if (sto.type == VAL_ERR)
-	    return sto;
-	sto.type = VAL_FN;
-	sto.n_els = f.n_args;
 	return sto;
     } else {
 	//isdef is a special function, we implement it here to avoid errors about potentially undefined spcl_vals
-	if (namecmp(f.name, "isdef", strlen("isdef")) == 0) {
+	if (s8cmp(f.name, s8("isdef")) == 0) {
 	    if (f.n_args == 0)
 		return spcl_make_err(E_LACK_TOKENS, "isdef() expected 1 argument, got 0");
 	    sto = spcl_find_rs( c, make_read_state(rs.b, fs_add(rs.b, arg_inds[0], 1), arg_inds[1]) );
@@ -2207,10 +2213,9 @@ static inline spcl_val parse_literal_fn(struct spcl_inst* c, spcl_key key, read_
 	if (func_val.type != VAL_FN) {
 	    cleanup_spcl_fn_call(&f);
 	    xfree(arg_inds);
-	    return spcl_make_err(E_LACK_TOKENS, "unrecognized function name %s\n", f.name);
+	    return spcl_make_err(E_LACK_TOKENS, "unrecognized function name %.*s\n", f.name.n, f.name.s);
 	}
 	//read the arguments
-	size_t j = 0;
 	for (size_t i = 0; i < f.n_args && i+1 < SPCL_ARGS_BSIZE; ++i) {
 	    lbi s = fs_add(rs.b, arg_inds[i], 1);
 	    while (is_whitespace(fs_get(rs.b, s)) && lbicmp(s, arg_inds[i+1]) < 0)
@@ -2224,16 +2229,13 @@ static inline spcl_val parse_literal_fn(struct spcl_inst* c, spcl_key key, read_
 		    return spcl_make_err(E_BAD_SYNTAX, "no expression between arguments");
 		break;
 	    }
-	    f.args[j] = spcl_parse_line_rs(c, make_read_state(rs.b, s, arg_inds[i+1]), NULL, KEY_NONE);
+	    f.args[i] = spcl_parse_line_rs(c, make_read_state(rs.b, s, arg_inds[i+1]), NULL, KEY_NONE);
 	    //check for errors
-	    if (f.args[j].type == VAL_ERR) {
-		spcl_val er = copy_spcl_val(f.args[j]);
+	    if (f.args[i].type == VAL_ERR) {
+		spcl_val er = copy_spcl_val(f.args[i]);
 		cleanup_spcl_fn_call(&f);
 		return er;
 	    }
-	    //only include defined spcl_vals in the argument list
-	    if (f.args[j].type != VAL_UNDEF)
-		++j;
 	}
 	sto = spcl_uf_eval(func_val.val.f, c, f);
     }
@@ -2255,13 +2257,6 @@ static inline spcl_val parse_literal_table(struct spcl_inst* c, read_state rs, l
     }
     destroy_spcl_fstream(sub_fs);
     return ret;
-}
-
-/**
- * This helper for spcl_parse_line_rs looks for keywords starting at rs. In the event that an error occurred it is returned. Otherwise the function returns none. Certain keywords such as for, if, etc. start execution at a new location (indicated by new_end). If one of these keywords is found, a numeric value with x=1 is returned to signal that spcl_parse_line_rs should immediately abort and jump to the appropriate point in execution. For this reason, the key found is stored in start_key.
- */
-static inline spcl_val do_keywords(spcl_key* start_key, read_state* rs, lbi* new_end) {
-
 }
 
 /**
@@ -2301,6 +2296,10 @@ static inline spcl_val spcl_parse_line_rs(struct spcl_inst* c, read_state rs, lb
 	    if (is_var) {
 		//spcl_find variables
 		sto = copy_spcl_val( spcl_find_rs(c, make_read_state(rs.b, rs.start, rs.end)) );
+		if (sto.type == VAL_UNDEF) {
+		    s8 tmp = fs_read(rs.b, rs.start, rs.end);
+		    return spcl_make_err(E_UNDEF, "token \"%.*s\" not defined", tmp.n, tmp.s);
+		}
 	    } else {
 		//interpret number literals
 		errno = 0;
@@ -2308,7 +2307,7 @@ static inline spcl_val spcl_parse_line_rs(struct spcl_inst* c, read_state rs, lb
 		sto.val.x = strtod(str, NULL);
 		sto.n_els = 1;
 		if (errno) {
-		    sto = spcl_make_err(E_UNDEF, "undefined token %s", str);
+		    sto = spcl_make_err(E_BAD_SYNTAX, "invalid numeric %s", str);
 		    xfree(str);
 		    return sto;
 		}
@@ -2520,15 +2519,15 @@ spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b) {
 	    while (is_whitespace(fs_get(rs.b, rs.start)))
 		rs.start = fs_add(rs.b, rs.start, 1);
 	    //TODO: allow enclosed quotes for files with whitespace
-	    char* name = fs_read(rs.b, rs.start);
-	    size_t name_len = (size_t)(strchr(name, '\n') - name);
-	    spcl_fstream* fs = make_spcl_fstreamn(name,  name_len);
+	    s8 name = fs_read(rs.b, rs.start, rs.end);
+	    name.n = (size)(strchr(name.s, '\n') - name.s);
+	    spcl_fstream* fs = make_spcl_fstreamn(name.s,  name.n);
 	    if (!fs)
-		return spcl_make_err(E_BAD_VALUE, "couldn't open file %s", fs_read(rs.b, rs.start));
+		return spcl_make_err(E_BAD_VALUE, "couldn't open file %.*s", name.n, name.s);
 	    ret = spcl_read_lines(c, fs);
 	    //set the end to the last character in the line
 	    end.line = rs.start.line;
-	    end.off = rs.start.off + name_len;
+	    end.off = rs.start.off + name.n;
 	/*TODO: if, else, for, and while
 	 * } else if (start_key == KEY_IF) {
 	    ret = get_block(start_key, &rs, &open_ind, &close_ind);*/
@@ -2536,9 +2535,11 @@ spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b) {
 	    ret = spcl_parse_line_rs(c, rs, &end, start_key);
 	}
 	if (ret.type == VAL_ERR || start_key == KEY_RET) {
-	    if (c->parent == NULL && start_key != KEY_RET) {
-		fprintf(stderr, "Error %s on line %lu: %s\n", errnames[ret.val.e->c], rs.start.line+1, ret.val.e->msg);
-		cleanup_spcl_val(&ret);
+	    if (start_key != KEY_RET && ret.val.e) {
+		s8 line = fs_read(rs.b, rs.start, fs_line_end(rs.b, rs.start));
+		fprintf(stderr, "\e[1m\033[31mError\033[0m\e[1m %s on line %lu:\e[m %.*s\n\t%s\n", errnames[ret.val.e->c], rs.start.line+1, line.n, line.s, ret.val.e->msg);
+		free(ret.val.e);
+		ret.val.e = NULL;
 	    }
 	    return ret;
 	}
@@ -2637,54 +2638,49 @@ spcl_val spcl_inst_from_file(const char* fname, int argc, const char** argv) {
  * arg_inds: indices for each argument
  * n_args: the number of arguments. Note that arg_inds must have one more value allocated than n_args so that it can store the termination points for each string
  * new_end: we must track the final location so that the caller fast-forwards to the end of the declaration
- * er: optionally save an error 
+ * returns: a spcl_val with the function set
  */
-static inline spcl_uf* make_spcl_uf_rs(read_state rs, lbi* arg_inds, size_t n_args, lbi* new_end, spcl_val* er) {
+static inline spcl_val spcl_make_fn_rs(read_state rs, lbi* arg_inds, size_t n_args, lbi* new_end) {
     //ensure that we can store the end location
-    if (!new_end) {
-	if (er) *er = spcl_make_err(E_BAD_SYNTAX, "declared function without room to grow");
-	return NULL;
-    }
+    if (!new_end)
+	return spcl_make_err(E_BAD_SYNTAX, "declared function without room to grow");
     //fast forward to the open curly brace
     lbi args_end = fs_add(rs.b, arg_inds[n_args], 1);
     while (is_whitespace(fs_get(rs.b, args_end)))
 	args_end = fs_add(rs.b, args_end, 1);
-    if (fs_get(rs.b, args_end) != BEG_CRL) {
-	if (er) *er = spcl_make_err(E_BAD_SYNTAX, "unexpected %c", fs_get(rs.b, args_end));//}
-	return NULL;
-    }//}
+    if (fs_get(rs.b, args_end) != BEG_CRL)
+	return spcl_make_err(E_BAD_SYNTAX, "unexpected %c", fs_get(rs.b, args_end));
     lbi op_loc, open_ind, close_ind;
     spcl_val sto = find_operator(make_read_state(rs.b, args_end, fs_end(rs.b)), &op_loc, &open_ind, &close_ind, new_end);
     //let errors fall through
-    if (sto.type == VAL_ERR) {
-	if (er) *er = sto;
-	return NULL;
-    }
+    if (sto.type == VAL_ERR)
+	return sto;
     //if we got here, then we can proceed without errors
-    spcl_uf* uf = xmalloc(sizeof(spcl_uf));
+    sto.type = VAL_FN;
+    sto.val.f = xmalloc(sizeof(spcl_uf));
+    sto.n_els = n_args;
     //setup the call signature
-    uf->call_sig.name = NULL;
-    uf->call_sig.n_args = n_args;
+    sto.val.f->call_sig.name = (s8){0};
+    sto.val.f->call_sig.n_args = n_args;
     //copy function argument names
     for (size_t i = 0; i < n_args && i+1 < SPCL_ARGS_BSIZE; ++i) {
 	lbi this_start = fs_add(rs.b, arg_inds[i], 1);
 	//we have to fast forward until we're on the same line so that we can safely use fs_read
 	while (this_start.line != arg_inds[i+1].line)
 	    this_start = fs_add(rs.b, this_start, 1);
-	size_t this_n = arg_inds[i+1].off - this_start.off;
-	uf->call_sig.args[i] = spcl_make_str(fs_read(rs.b, this_start), this_n+1);
-	uf->call_sig.args[i].val.s[this_n] = 0;//null terminate just in case
+	s8 argname = fs_read(rs.b, this_start, arg_inds[i+1]);
+	sto.val.f->call_sig.args[i] = spcl_make_str(argname.s, argname.n);
     }
-    uf->code_lines = fs_get_enclosed(rs.b, fs_add(rs.b, open_ind, 1), close_ind);
-    uf->exec = NULL;
+    sto.val.f->code_lines = fs_get_enclosed(rs.b, fs_add(rs.b, open_ind, 1), close_ind);
+    sto.val.f->exec = NULL;
     //we change the parent in spcl_uf_eval, so we just set NULL to be a dummy
-    uf->fn_scope = make_spcl_inst(0x01);
-    return uf;
+    sto.val.f->fn_scope = make_spcl_inst(0x01);
+    return sto;
 }
 spcl_uf* make_spcl_uf_ex(spcl_val (*p_exec)(spcl_inst*, spcl_fn_call)) {
     spcl_uf* uf = xmalloc(sizeof(spcl_uf));
     uf->code_lines = NULL;
-    uf->call_sig.name = NULL;
+    uf->call_sig.name = (s8){0};
     uf->call_sig.n_args = 0;
     uf->exec = p_exec;
     uf->fn_scope = NULL;
@@ -2693,7 +2689,9 @@ spcl_uf* make_spcl_uf_ex(spcl_val (*p_exec)(spcl_inst*, spcl_fn_call)) {
 spcl_uf* copy_spcl_uf(const spcl_uf* o) {
     spcl_uf* uf = xmalloc(sizeof(spcl_uf));
     uf->code_lines = (o->code_lines)? copy_spcl_fstream(o->code_lines): NULL;
-    uf->call_sig.name = (o->call_sig.name)? strdup(o->call_sig.name): NULL;
+    //TODO: the name should be made valid after copying
+    uf->call_sig.name = (s8){0};
+    //uf->call_sig.name = (o->call_sig.name)? strdup(o->call_sig.name): NULL;
     uf->call_sig.n_args = o->call_sig.n_args;
     uf->exec = o->exec;
     uf->fn_scope = NULL;
@@ -2714,7 +2712,7 @@ spcl_val spcl_uf_eval(spcl_uf* uf, spcl_inst* c, spcl_fn_call call) {
     } else if (uf->code_lines) {
 	//TODO: handle script functions
 	if (call.n_args != uf->call_sig.n_args)
-	    return spcl_make_err(E_LACK_TOKENS, "%s() expected %lu arguments, got %lu", uf->call_sig.name, call.n_args, uf->call_sig.name);
+	    return spcl_make_err(E_LACK_TOKENS, "%.*s() expected %lu arguments, got %lu", call.name.n, call.name.s, uf->call_sig.n_args, call.n_args);
 	//setup a new scope with function arguments defined
 	uf->fn_scope->parent = c;
 	for (size_t i = 0; i < uf->call_sig.n_args; ++i) {

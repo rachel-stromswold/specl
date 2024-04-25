@@ -3,10 +3,10 @@
 
 extern "C" {
 #include "speclang.h"
+#include "utils.h"
 #define TEST_FNAME	"/tmp/speclang_test.spcl"
 }
 #define STRIFY(S) #S
-
 void test_num(spcl_val v, double x) {
     CHECK(v.type == VAL_NUM);
     CHECK(v.val.x == x);
@@ -760,14 +760,6 @@ TEST_CASE("builtin functions") {
     destroy_spcl_inst(sc);
 }
 
-#if SPCL_DEBUG_LVL>0
-char* fetch_fs_line(const spcl_fstream* fs, size_t line, size_t off) {
-    lbi s = make_lbi(line,off);
-    lbi e = make_lbi(line, fs->line_sizes[line]);
-    return fs_get_line(fs, s, e, NULL);
-}
-#endif
-
 void write_test_file(const char** lines, size_t n_lines, const char* fname) {
     FILE* f = fopen(fname, "w");
     for (size_t i = 0; i < n_lines; ++i)
@@ -780,7 +772,6 @@ void write_test_file(const char** lines, size_t n_lines, const char* fname) {
 TEST_CASE("spcl_fstream fs_get_enclosed") {
     const char* fun_contents[] = {"{", "if a > 5 {", "return 1", "}", "return 0", ""};
     const char* if_contents[] = {"{", "return 1", ""};
-    char* strval = NULL;
 
     SUBCASE("open brace on a different line") {
 	const char* lines[] = { "fn test_fun(a)", "{", "if a > 5 {", "return 1", "}", "return 0", "}" };
@@ -789,9 +780,13 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	//check the lines (curly brace on new line)
 	spcl_fstream* fs = make_spcl_fstream(TEST_FNAME);
 	for (size_t i = 0; i < n_lines; ++i) {
-	    strval = fetch_fs_line(fs, i, 0);
-	    CHECK(strcmp(lines[i], strval) == 0);
-	    free(strval);
+	    s8 line;
+	    //duplicate to silence const char* to char* errors
+	    line.s = strdup(lines[i]);
+	    line.n = strlen(lines[i]);
+	    s8 strval = fs_read( fs, make_lbi(i, 0), make_lbi(i, line.n) );
+	    CHECK(s8cmp(line, strval) == 0);
+	    free(line.s);
 	}
 	//find the block that says fn
 	read_state rs = make_read_state(fs, make_lbi(0,0), make_lbi(1,0));
@@ -813,9 +808,12 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	CHECK(close_ind.line == 6);CHECK(close_ind.off == 0);
 	spcl_fstream* b_fun_con = fs_get_enclosed(fs, open_ind, close_ind);
 	for (size_t i = 0; i < b_fun_con->n_lines; ++i) {
-	    strval = fetch_fs_line(b_fun_con, i,0);
-	    CHECK(strcmp(fun_contents[i], strval) == 0);
-	    free(strval);
+	    s8 line;
+	    line.s = strdup(fun_contents[i]);
+	    line.n = strlen(fun_contents[i]);
+	    s8 strval = fs_read(b_fun_con, make_lbi(i,0), make_lbi(i, line.n));
+	    CHECK(s8cmp(line, strval) == 0);
+	    free(line.s);
 	}
 	//check the braces around the if statement
 	er = find_operator(make_read_state(fs, make_lbi(2,0), close_ind), &op_loc, &open_ind, &close_ind, &new_end);
@@ -824,9 +822,12 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	CHECK(close_ind.line == 4);CHECK(close_ind.off == 0);
 	spcl_fstream* b_if_con = fs_get_enclosed(fs, open_ind, close_ind);
 	for (size_t i = 0; i < b_if_con->n_lines; ++i) {
-	    strval = fetch_fs_line(b_if_con, i,0);
-	    CHECK(strcmp(if_contents[i], strval) == 0);
-	    free(strval);
+	    s8 line;
+	    line.s = strdup(if_contents[i]);
+	    line.n = strlen(if_contents[i]);
+	    s8 strval = fs_read(b_if_con, make_lbi(i,0), make_lbi(i, line.n));
+	    CHECK(s8cmp(line, strval) == 0);
+	    free(line.s);
 	}
 	destroy_spcl_fstream(b_if_con);
 	destroy_spcl_fstream(b_fun_con);
@@ -839,9 +840,12 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	//check the lines (curly brace on new line)
 	spcl_fstream* fs = make_spcl_fstream(TEST_FNAME);
 	for (size_t i = 0; i < n_lines; ++i) {
-	    strval = fetch_fs_line(fs, i, 0);
-	    CHECK(strcmp(lines[i], strval) == 0);
-	    free(strval);
+	    s8 line;
+	    line.s = strdup(lines[i]);
+	    line.n = strlen(lines[i]);
+	    s8 strval = fs_read(fs, make_lbi(i, 0), make_lbi(i, line.n));
+	    CHECK(s8cmp(line, strval) == 0);
+	    free(line.s);
 	}
 	//find the block that says fn
 	read_state rs = make_read_state(fs, make_lbi(0,0), make_lbi(1,0));
@@ -1062,7 +1066,7 @@ TEST_CASE("spcl_inst parsing") {
 	    "arr1 = [math.sin(6*x/y) for x in xs]",
 	    "one = 1",
 	    "two = 2",
-	    "three=one+two"};
+	    "three=one+two" };
 	size_t n_lines1 = sizeof(lines1)/sizeof(char*);
 	write_test_file(lines1, n_lines1, TEST_FNAME);
 	spcl_fstream* b_1 = make_spcl_fstream(TEST_FNAME);

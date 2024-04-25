@@ -19,6 +19,10 @@ fn ensemble = (p_num, p_mass, p_in_temp, p_e_per_bs) {
     }
 }
 
+fn hard_sphere_int = (r0, p_ene_0) {
+    return {__type__ = "hard_sphere_int"; r_sq_max = convert_len(r0)^2; ene_0 = p_ene_0}
+}
+
 fn lj_int = (r0, sigma, epsilon) {
     # convert units;
     r0 = convert_len(r0);
@@ -26,10 +30,16 @@ fn lj_int = (r0, sigma, epsilon) {
 
     # convert r->R^2. Calculate the parameters A=4*epsilon*sigma^12, B = 4*epsilon*sigma^6, offset = A/R^12 - B/R^6;
     sigma_6 = sigma^6;
-    a = 4*epsilon*(sigma_6^2);
-    b = 4*epsilon*sigma_6;
-    ene_0 = a/r0^12 - b/r0^6;
-    return {__type__ = "lj_int"; params = [r0^2, a, b, ene_0]};
+    p_a = 4*epsilon*(sigma_6^2);
+    p_b = 4*epsilon*sigma_6;
+    p_ene_0 = p_a/r0^12 - p_b/r0^6;
+    return {__type__ = "lj_int"; r_sq_max = r0^2; a = p_a; b = p_b; ene_0 = p_ene_0};
+}
+
+## Create a linear trap
+# k: the steepness (in Gauss per nm) along the x and y axes. The z axis has a steepness 2*k.
+fn lin_pot = (p_kx, p_ky, p_kz) {
+    return {__type__ = "lin_pot"; k_x = p_kx^2; k_y = p_ky^2; k_z = p_kz^2}
 }
 
 # Create a quadropole trap
@@ -41,29 +51,30 @@ fn quad_pot = (p_k) {
 # Create a Joffe-Pritchard trap
 # k: the steepness (in Gauss per nm) along the x and y axes. The z axis has a steepness 2*k.
 fn jp_pot = (p_k) {
-    return {__type__ = "jp_pot"; k = box_len/p_k^2}
-}
-
-fn hard_sphere_int = (r0, ene) {
-    return {__type__ = "hard_sphere_int"; params = [convert_len(r0)^2, ene]}
+    return {__type__ = "jp_pot"; k = (box_len/p_k)^2}
 }
 
 # Create a Gaussian update rule. Each Monte-Carlo iteration a random point is moved according to a Gaussian with standard deviation step_std
-fn gauss_update = (step_std) {
-    return {__type__ = "gauss_update"; params = [convert_len(step_std)]}
+fn gauss_update = (p_rad, p_thresholds) {
+    return {
+	__type__ = "gauss_update";
+	rad = convert_len(p_rad);
+	thresholds = p_thresholds;
+	n_micro = 1;
+    }
 }
 
 box_len = 2
 min_leaf_size = 2
-update=gauss_update(3)
+update=gauss_update(3, [0,1])
 potential = quad_pot(4)
 interaction=hard_sphere_int(5, 6)
 rb_87=ensemble(7, 8, 9, vec(1/2,0,-1/2,-2,-1,0,1,2))
 
-assert(update.params[0] == 1.5);
+assert(update.rad == 1.5);
 assert(potential.k == 0.5);
-assert(interaction.params[0] == 6.25);
-assert(interaction.params[1] == 6);
+assert(interaction.r_sq_max == 6.25);
+assert(interaction.ene_0 == 6);
 
 box_len = 2
 potential = jp_pot(3)

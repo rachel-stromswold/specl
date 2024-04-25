@@ -1,7 +1,6 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
 
 #define BLK_MAX			16	//the maximum number of nested blocks
 #define LST_MAX			8	//the maximum number of nested lists for a flatten statement
@@ -14,15 +13,6 @@
 #define END_CRL			'}'
 #define BEG_QTE			'\"'
 #define END_QTE			'\"'
-
-//handy dandy macros taken from https://nullprogram.com/blog/2023/10/08/
-#define countof(a)    (size_t)(sizeof(a) / sizeof(*(a)))
-#define lengthof(s)   (countof(s) - 1)
-#define mkarr(a, t, n)  (t *)xrealloc(a, sizeof(t)*n)
-
-#define u8	unsigned char
-#define u64	uint64_t
-#define size	ptrdiff_t
 
 //this is a macro to initialize a dummy line_buffer named fs->
 #define str_to_fs(str)				\
@@ -121,6 +111,9 @@ int TYPED3(STACK_PEEK,TYPE,N)(stack(TYPE,N)* s, size_t ind, TYPE* sto) {		\
  */
 #define peek(TYPE,N) TYPED3(STACK_PEEK,TYPE,N)
 
+/** ============================ custom allocators ============================ **/
+//TODO
+
 //These functions work like malloc and realloc, but abort execution if allocation failed.
 static inline void* xmalloc(size_t n) {
     void* ret = malloc(n);
@@ -160,7 +153,7 @@ static inline unsigned char is_char_sep(char c) {
     return 0;
 }
 
-int namecmp(const char* a, const char* b, size_t n) {
+inline int namecmp(const char* a, const char* b, size_t n) {
     size_t i = 0;size_t j = 0;
     while (i < n && is_char_sep(a[i]))
 	++i;
@@ -204,7 +197,7 @@ static inline char get_match(char s) {
 /**
  * write a floating point value to the string str
  */
-int write_numeric(char* str, size_t n, double x) {
+inline int write_numeric(char* str, size_t n, double x) {
     if (x >= 1000000)
 	return snprintf(str, n, "%e", x);
     return snprintf(str, n, "%f", x);
@@ -237,44 +230,3 @@ static inline char* trim_whitespace(char* str, size_t* len) {
     return str;
 }
 
-/** ============================ fat strings ============================ **/
-
-#define s8(s) (s8){(u8 *)s, lengthof(s)}
-typedef struct {
-    size n;		//the total number of bytes used by the string (NOT utf code points)
-    u8* s;		//the actual data for the string
-} s8;
-/**
- * Test whether two strings are equal. In theory this is slightly faster than s8cmp. However, it makes no guarantee that the signedness of the return value corresponds to asciibetical order.
- * returns 1 if a and b are equal or 0 otherwise.
- */
-static inline int s8eq(s8 a, s8 b) {
-    //strings with different lengths are always not equal
-    if (a.n != b.n)
-	return 0;
-    size nby8 = a.n / 8;
-    size nr8 = a.n % 8;
-    for (size i = 0; i < nby8; ++i) {
-	//check whether the next 8 bytes are equal
-	if ( ((u64*)(a.s))[i] != ((u64*)(b.s))[i] )
-	    return 0;
-    }
-    //most strings will have some leftovers after we chunk into groups of 8
-    for (size i = nby8*8; i < nby8*8 + nr8; ++i) {
-	if (a.s[i] != b.s[i])
-	    return 0;
-    }
-    return 1;
-}
-/**
- * Test whether a > b in asciibetical order. The result should be equivalent to strcmp(a.s, b.s).
- */
-static inline int s8cmp(s8 a, s8 b) {
-    size n_min = (a.n < b.n) ? a.n : b.n;
-    for (size i = 0; i < n_min; ++i) {
-	if (a.s[i] - b.s[i])
-	    return a.s[i] - b.s[i];
-    }
-    //if we've gotten this far, then we need to use length as a tiebreaker
-    return a.n - b.n;
-}

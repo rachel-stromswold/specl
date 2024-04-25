@@ -6,6 +6,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include "s8.h"
 
 //hints for dynamic buffer sizes
 #define ERR_BSIZE		1024
@@ -320,7 +321,7 @@ void cleanup_name_val_pair(name_val_pair nv);
 
 //TODO: refactor spcl_fn_call to accept lbi's instead of names
 typedef struct spcl_fn_call {
-    const char* name;
+    s8 name;
     spcl_val args[SPCL_ARGS_BSIZE];
     size_t n_args;
 } spcl_fn_call;
@@ -373,6 +374,7 @@ void destroy_spcl_inst(spcl_inst* c);
  */
 #if SPCL_DEBUG_LVL>0
 typedef enum { KEY_NONE, KEY_IMPORT, KEY_CLASS, KEY_IF, KEY_FOR, KEY_ELSE, KEY_WHILE, KEY_BREAK, KEY_CONT, KEY_RET, KEY_FN, SPCL_N_KEYS } spcl_key;
+s8 fs_read(const spcl_fstream* fs, lbi s, lbi e);
 spcl_val do_op(struct spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end, spcl_key key);
 read_state make_read_state(const spcl_fstream* fs, lbi s, lbi e);
 spcl_key get_keyword(read_state* rs);
