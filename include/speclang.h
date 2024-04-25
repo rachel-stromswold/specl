@@ -29,7 +29,7 @@
 #define GROW_LOAD_DEN		5
 
 #if SPCL_DEBUG_LVL<1
-#define scpl_local static inline
+#define spcl_local static inline
 #else
 #define spcl_local
 #endif
