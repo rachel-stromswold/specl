@@ -50,7 +50,7 @@ stack(TYPE,N) TYPED3(MAKE_STACK,TYPE,N)() {						\
     return ret;										\
 }											\
 void TYPED3(DESTROY_STACK,TYPE,N) (stack(TYPE,N)* s, void (*destroy_el)(TYPE*)) {	\
-    for (size_t i = 0; i < s->ptr; ++i)							\
+    for (size_t i = 0; destroy_el && i < s->ptr; ++i)					\
 	destroy_el(s->buf + i);								\
     s->ptr = 0;										\
 }											\

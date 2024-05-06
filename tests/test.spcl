@@ -11,3 +11,8 @@ assert(len(lst) == 4)
 # even if they take up multiple lines
 gs = Gaussian_source("Ey", 1.5, 7.0, 3.0, 0.75, 6, 5.2, Box(vec(0,0,offset), vec(2*offset,.4,.2)))
 potential = quad_pot(4)
+
+#make sure that string comparisons and chained ternary operations work
+arg = "T"
+vehicle = (arg == "B") ? "bus" : (arg == "A") ? "airplane" : (arg == "T") ? "train" : (arg == "C") ? "horse" : "feet"
+assert(vehicle == "train")

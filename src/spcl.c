@@ -10,6 +10,9 @@ int main(int argc, char** argv) {
     if (argc > 2) {
 	argc -= 2;
 	argv = argv+2;
+    } else {
+	argc = 0;
+	argv = NULL;
     }
     //actually call
     spcl_val v = spcl_inst_from_file(fname, argc, argv);

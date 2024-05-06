@@ -84,6 +84,19 @@ static inline size_t fs_diff(const spcl_fstream* fs, lbi r, lbi l) {
 /** ======================================================== utility functions ======================================================== **/
 
 /**
+ * Test whether a > b in asciibetical order. The result should be equivalent to strncmp(a.s, b.s).
+ */
+spcl_local int spcl_strcmp(spcl_val a, spcl_val b) {
+    size_t n_min = (a.n_els < b.n_els) ? a.n_els : b.n_els;
+    for (size i = 0; i < n_min; ++i) {
+	if (a.val.s[i] - b.val.s[i])
+	    return a.val.s[i] - b.val.s[i];
+    }
+    //if we've gotten this far, then we need to use length as a tiebreaker
+    return a.n_els - b.n_els;
+}
+
+/**
  * get the size of a spcl_context
  */
 static inline size_t con_size(const spcl_inst* c) {
@@ -728,7 +741,8 @@ spcl_val spcl_print(struct spcl_inst* inst, spcl_fn_call f) {
 	return spcl_make_none();
     size_t j = 1;
     if (f.args[0].type == VAL_STR) {
-	for (char* c = f.args[0].val.s; *c; ++c) {
+	for (int i = 0; i < f.args[0].n_els; ++i) {
+	    char* c = f.args[0].val.s + i;
 	    if (*c == '\\') {
 		switch (c[1]) {
 		    case 't': fputc('\t', stdout);break;
@@ -739,7 +753,7 @@ spcl_val spcl_print(struct spcl_inst* inst, spcl_fn_call f) {
 		    case '\'': fputc('\'', stdout);break;
 		    default: return spcl_make_err(E_BAD_SYNTAX, "unrecognized escape sequence %c%c", c[0], c[1]);
 		}
-		++c;
+		++i;
 	    } else if (*c == '%') {
 		if (j >= f.n_args)
 		    return spcl_make_err(E_LACK_TOKENS, "too few tokens for format string");
@@ -923,7 +937,7 @@ spcl_val spcl_make_inst(spcl_inst* parent, const char* s) {
     v.type = VAL_INST;
     v.val.c = make_spcl_inst(parent);
     if (s && s[0] != 0) {
-	spcl_val tmp = spcl_make_str(s, strlen(s)+1);
+	spcl_val tmp = spcl_make_str(s, strlen(s));
 	spcl_set_val(v.val.c, "__type__", tmp, 0);
     }
     return v;
@@ -934,16 +948,7 @@ spcl_val spcl_valcmp(spcl_val a, spcl_val b) {
     if (a.type == VAL_NUM) {
 	return spcl_make_num(a.val.x - b.val.x);
     } else if (a.type == VAL_STR) {
-	//first make sure that both strings are not null while ensuring that null strings compare identically
-	if (a.val.s == NULL) {
-	    if (b.val.s)
-		return spcl_make_num(1);
-	    return spcl_make_num(0);
-	}
-	//we don't need to check whether a is null again, if it reached this point it is valid
-	if (b.val.s == NULL)
-	    return spcl_make_num(-1);
-	return spcl_make_num(strcmp(a.val.s, b.val.s));
+	return spcl_make_num(spcl_strcmp(a, b));
     } else if (a.type == VAL_LIST) {
 	if (a.n_els != b.n_els)
 	    return spcl_make_num(a.n_els - b.n_els);
@@ -990,6 +995,9 @@ char* spcl_stringify(spcl_val v, char* buf, size_t n) {
 	return buf;
     //exit if there isn't enough space to write the null terminator
     if (v.type == VAL_STR) {
+	//copy at most n_els
+	if (v.n_els < n)
+	    n = v.n_els;
 	return stpncpy(buf, v.val.s, n);
     } else if (v.type == VAL_ARRAY) {
 	size_t off = 1;
@@ -1245,10 +1253,10 @@ spcl_local void val_add(spcl_val* l, spcl_val r) {
 	size_t r_len = spcl_est_strlen(r);
 	//create a new string and copy
 	l->val.s = xrealloc(l->val.s, l_len+r_len);//l_len already includes null terminator so we have enough
-	char* tmp = spcl_stringify(r, l->val.s+l_len-1, r_len);
+	char* tmp = spcl_stringify(r, l->val.s+l_len, r_len);
 	tmp[0] = 0;
 	//now set the spcl_val
-	l->n_els = (size_t)(tmp - l->val.s) + 1;
+	l->n_els = (size_t)(tmp - l->val.s);
     } else {
 	cleanup_spcl_val(l);
 	*l = spcl_make_err(E_BAD_TYPE, "cannot add types %s and %s", valnames[l->type], valnames[r.type]);
@@ -2025,6 +2033,33 @@ static inline void destroy_for_state(for_state* fs, spcl_inst* c) {
     cleanup_spcl_val(&fs->it_list);
     xfree(fs);
 }
+//helper for spcl_parse_line to handle string literals
+static inline spcl_val parse_literal_str(spcl_inst* c, read_state rs, lbi open_ind, lbi close_ind) {
+    spcl_val v;
+    v.type = VAL_STR;
+    //set up a buffer with enough memory
+    v.val.s = xmalloc( fs_diff(rs.b, close_ind, open_ind) );
+    v.n_els = 0;
+    for (lbi it = fs_add(rs.b, open_ind, 1); lbicmp(it, close_ind) < 0; it = fs_add(rs.b, it, 1)) {
+	char c = fs_get(rs.b, it);
+	//check for escape sequences
+	if (c == '\\') {
+	    it = fs_add(rs.b, it, 1);
+	    c = fs_get(rs.b, it);
+	    switch (c) {
+		case 't': v.val.s[v.n_els++] = '\t';break;
+		case 'n': v.val.s[v.n_els++] = '\n';break;
+		case '\\': v.val.s[v.n_els++] = '\\';break;
+		case '\"': v.val.s[v.n_els++] = '\"';break;
+		case '\'': v.val.s[v.n_els++] = '\'';break;
+		default: free(v.val.s);return spcl_make_err(E_BAD_SYNTAX, "unrecognized escape sequence \\%c", c);	
+	    }
+	} else {
+	    v.val.s[v.n_els++] = c;
+	}
+    }
+    return v;
+}
 //helper for spcl_parse_line to hand list literals
 static inline spcl_val parse_literal_list(struct spcl_inst* c, read_state rs, lbi open_ind, lbi close_ind) {
     rs.start = open_ind;
@@ -2317,7 +2352,8 @@ static inline spcl_val spcl_parse_line_rs(struct spcl_inst* c, read_state rs, lb
 	} else {
 	    //if there are enclosed blocks then we need to read those
 	    switch (fs_get(rs.b, open_ind)) {
-	    case '\"': sto.type = VAL_STR; sto.val.s = fs_get_line(rs.b, fs_add(rs.b, open_ind, 1), close_ind, &sto.n_els);sto.n_els += 1;break; //"
+	    //case '\"': sto.type = VAL_STR; sto.val.s = fs_get_line(rs.b, fs_add(rs.b, open_ind, 1), close_ind, &sto.n_els);sto.n_els += 1;break; //"
+	    case '\"': sto = parse_literal_str(c, rs, open_ind, close_ind);break;
 	    case BEG_SQR:  sto = (is_var)? copy_spcl_val(spcl_find_rs(c, rs)) : parse_literal_list(c, rs, open_ind, close_ind);break; //]
 	    case BEG_CRL:  sto = parse_literal_table(c, rs, open_ind, close_ind);break; //}
 	    case BEG_PAR:  sto = parse_literal_fn(c, start_key, rs, open_ind, close_ind, new_end);break; //)
@@ -2355,7 +2391,7 @@ int spcl_find_object(const spcl_inst* c, const char* str, const char* typename, 
     if (vobj.type != VAL_INST)
 	return -1;
     spcl_val tmp = spcl_find(vobj.val.c, "__type__");
-    if (tmp.type != VAL_STR || strcmp(tmp.val.s, typename))
+    if (tmp.type != VAL_STR || strncmp(tmp.val.s, typename, tmp.n_els))
 	return -2;
     if (sto) *sto = vobj.val.c;
     return 0;
@@ -2410,6 +2446,7 @@ int spcl_find_c_darray(const spcl_inst* c, const char* str, double* sto, size_t 
     return -2;
 }
 int spcl_find_c_str(const spcl_inst* c, const char* str, char* sto, size_t n) {
+    //we can't save anything to an empty buffer so exit early
     if (sto == NULL || n == 0)
 	return 0;
     spcl_val tmp = spcl_find(c, str);
@@ -2418,8 +2455,9 @@ int spcl_find_c_str(const spcl_inst* c, const char* str, char* sto, size_t n) {
 	return -1;
     }
     //bounds check
-    size_t n_write = (tmp.n_els > n) ? n : tmp.n_els;
+    size_t n_write = (tmp.n_els > n-1) ? n : tmp.n_els;
     memcpy(sto, tmp.val.s, sizeof(char)*n_write);
+    sto[n_write] = 0;
     return (int)n_write;
 }
 int spcl_find_int(const spcl_inst* c, const char* str, int* sto) {

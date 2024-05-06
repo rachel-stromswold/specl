@@ -7,6 +7,7 @@ extern "C" {
 #define TEST_FNAME	"/tmp/speclang_test.spcl"
 }
 #define STRIFY(S) #S
+
 void test_num(spcl_val v, double x) {
     CHECK(v.type == VAL_NUM);
     CHECK(v.val.x == x);
@@ -107,25 +108,25 @@ TEST_CASE("spcl_val parsing") {
 	strncpy(buf, "\"foo\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_STR);
-	CHECK(strcmp(tmp_val.val.s, "foo") == 0);
+	CHECK(spcl_strcmp(tmp_val, cstr_to_spcl("foo")) == 0);
 	cleanup_spcl_val(&tmp_val);
 	//test a string with whitespace
 	strncpy(buf, "\" foo bar \"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_STR);
-	CHECK(strcmp(tmp_val.val.s, " foo bar ") == 0);
+	CHECK(spcl_strcmp(tmp_val, cstr_to_spcl(" foo bar ")) == 0);
 	cleanup_spcl_val(&tmp_val);
 	//test a string with stuff inside it
 	strncpy(buf, "\"foo(bar)\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_STR);
-	CHECK(strcmp(tmp_val.val.s, "foo(bar)") == 0);
+	CHECK(spcl_strcmp(tmp_val, cstr_to_spcl("foo(bar)")) == 0);
 	cleanup_spcl_val(&tmp_val);
 	//test a string with an escaped string
 	strncpy(buf, "\"foo\\\"bar\\\" \"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_STR);
-	CHECK(strcmp(tmp_val.val.s, "foo\\\"bar\\\" ") == 0);
+	CHECK(spcl_strcmp(tmp_val, cstr_to_spcl("foo\"bar\" ")) == 0);
 	cleanup_spcl_val(&tmp_val);
     }
     SUBCASE("Reading lists to spcl_vals works") {
@@ -136,7 +137,7 @@ TEST_CASE("spcl_val parsing") {
 	CHECK(tmp_val.val.l != NULL);
 	CHECK(tmp_val.n_els == 1);
 	CHECK(tmp_val.val.l[0].type == VAL_STR);
-	CHECK(strcmp(tmp_val.val.l[0].val.s, "foo") == 0);
+	CHECK(spcl_strcmp(tmp_val.val.l[0], cstr_to_spcl("foo")) == 0);
 	cleanup_spcl_val(&tmp_val);
 	//test two element lists
 	strncpy(buf, "[\"foo\", 1]", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
@@ -145,7 +146,7 @@ TEST_CASE("spcl_val parsing") {
 	CHECK(tmp_val.val.l != NULL);
 	CHECK(tmp_val.n_els == 2);
 	CHECK(tmp_val.val.l[0].type == VAL_STR);
-	CHECK(strcmp(tmp_val.val.l[0].val.s, "foo") == 0);
+	CHECK(spcl_strcmp(tmp_val.val.l[0], cstr_to_spcl("foo")) == 0);
 	CHECK(tmp_val.val.l[1].type == VAL_NUM);
 	CHECK(tmp_val.val.l[1].val.x == 1);
 	cleanup_spcl_val(&tmp_val);
@@ -173,11 +174,11 @@ TEST_CASE("spcl_val parsing") {
 	    CHECK(element.n_els == 3);
 	    CHECK(element.val.l != NULL);
 	    CHECK(element.val.l[0].type == VAL_STR);
-	    CHECK(strcmp(element.val.l[0].val.s, "4") == 0);
+	    CHECK(spcl_strcmp(element.val.l[0], cstr_to_spcl("4")) == 0);
 	    CHECK(element.val.l[1].type == VAL_STR);
-	    CHECK(strcmp(element.val.l[1].val.s, "5") == 0);
+	    CHECK(spcl_strcmp(element.val.l[1], cstr_to_spcl("5")) == 0);
 	    CHECK(element.val.l[2].type == VAL_STR);
-	    CHECK(strcmp(element.val.l[2].val.s, "6") == 0);
+	    CHECK(spcl_strcmp(element.val.l[2], cstr_to_spcl("6")) == 0);
 	}
 	cleanup_spcl_val(&tmp_val);
     }
@@ -245,7 +246,7 @@ TEST_CASE("string handling") {
 	buf[i] = '\"';
 	buf[i+1] = 0;
 	tmp_val = spcl_parse_line(sc, buf);
-	CHECK(tmp_val.n_els == i);
+	CHECK(tmp_val.n_els == i-1);
 	cleanup_spcl_val(&tmp_val);
 	CHECK(tmp_val.n_els == 0);
     }
@@ -285,6 +286,9 @@ TEST_CASE("operations") {
         strncpy(buf, "2*9/4*3", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 1.5);
+	strncpy(buf, "2^-4", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        tmp_val = spcl_parse_line(sc, buf);
+	test_num(tmp_val, 0.0625);
 	strncpy(buf, "-2*9^2/4*3", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, -13.5);
@@ -317,8 +321,8 @@ TEST_CASE("operations") {
         strncpy(buf, "\"foo\"+\"bar\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
         spcl_val tmp_val = spcl_parse_line(sc, buf);
         CHECK(tmp_val.type == VAL_STR);
-        CHECK(strcmp(tmp_val.val.s, "foobar") == 0);
-	CHECK(tmp_val.n_els == 7);
+        CHECK(spcl_strcmp(tmp_val, cstr_to_spcl("foobar")) == 0);
+	CHECK(tmp_val.n_els == 6);
         cleanup_spcl_val(&tmp_val);
 	CHECK(tmp_val.n_els == 0);
     }
@@ -358,11 +362,11 @@ TEST_CASE("operations") {
 	strncpy(buf, "(1 < 2) ? \"100\" : \"200\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_STR);
-	CHECK(strcmp(tmp_val.val.s, "100") == 0);
+	CHECK(spcl_strcmp(tmp_val, cstr_to_spcl("100")) == 0);
 	strncpy(buf, "(1 > 2) ? \"100\" : \"200\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_STR);
-	CHECK(strcmp(tmp_val.val.s, "200") == 0);
+	CHECK(spcl_strcmp(tmp_val, cstr_to_spcl("200")) == 0);
 	//test graceful failure conditions
 	strncpy(buf, "(1 < 2) ? 100", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
 	tmp_val = spcl_parse_line(sc, buf);
@@ -886,7 +890,7 @@ spcl_val test_fun_call(spcl_inst* c, spcl_fn_call f) {
     if (a > 5) {
 	ret.type = VAL_INST;
 	ret.val.c = make_spcl_inst(c);
-	spcl_set_val(ret.val.c, "name", spcl_make_str("hi", 3), 0);
+	spcl_set_val(ret.val.c, "name", cstr_to_spcl("hi"), 0);
 	return ret;
     }
     return f.args[0];
@@ -973,7 +977,7 @@ TEST_CASE("spcl_inst parsing") {
 	CHECK(val_a.type == VAL_INST);
 	spcl_val val_a_name = spcl_find(val_a.val.c, "name");
 	CHECK(val_a_name.type == VAL_STR);
-	CHECK(strcmp(val_a_name.val.s, "apple") == 0);
+	CHECK(spcl_strcmp(val_a_name, cstr_to_spcl("apple")) == 0);
 	spcl_val val_a_spcl_val = spcl_find(val_a.val.c, "spcl_vals");
 	REQUIRE(val_a_spcl_val.type == VAL_LIST);
 	REQUIRE(val_a_spcl_val.n_els == 2);
@@ -1013,7 +1017,7 @@ TEST_CASE("spcl_inst parsing") {
 	CHECK(val_b.type == VAL_INST);
 	spcl_val val_b_name = spcl_find(val_b.val.c, "name");
 	CHECK(val_b_name.type == VAL_STR);
-	CHECK(strcmp(val_b_name.val.s, "hi") == 0);
+	CHECK(spcl_strcmp(val_b_name, cstr_to_spcl("hi")) == 0);
 	free(tmp_name);
 	destroy_spcl_inst(c);
 	destroy_spcl_fstream(b_1);
@@ -1042,10 +1046,10 @@ TEST_CASE("spcl_inst parsing") {
 	//make sure that the number spcl_val a is there
 	spcl_val val_a = spcl_find(v.val.c, "a");
 	REQUIRE(val_a.type == VAL_STR);
-	CHECK(strcmp(val_a.val.s, "a") == 0);
+	CHECK(spcl_strcmp(val_a, cstr_to_spcl("a")) == 0);
 	spcl_val val_b = spcl_find(v.val.c, "b");
 	REQUIRE(val_b.type == VAL_STR);
-	CHECK(strcmp(val_b.val.s, "b") == 0);
+	CHECK(spcl_strcmp(val_b, cstr_to_spcl("b")) == 0);
 	//look at the returned instance
 	spcl_val val_c = spcl_find(v.val.c, "c");
 	REQUIRE(val_c.type == VAL_INST);
@@ -1054,7 +1058,7 @@ TEST_CASE("spcl_inst parsing") {
 	test_num(val_c, 2);
 	val_c = spcl_find(sub_c, "__type__");
 	REQUIRE(val_c.type == VAL_STR);
-	CHECK(strcmp(val_c.val.s,"test_inst") == 0);
+	CHECK(spcl_strcmp(val_c, cstr_to_spcl("test_inst")) == 0);
 	cleanup_spcl_val(&v);
     }
     SUBCASE ("stress test") {
@@ -1171,7 +1175,7 @@ TEST_CASE("file parsing") {
     spcl_inst* sub;
     REQUIRE(spcl_find_object(c, "gs", "Gaussian_source", &sub) == 0);
     //string lookups
-    CHECK(spcl_find_c_str(sub, "component", buf, SPCL_STR_BSIZE) == 3);
+    CHECK(spcl_find_c_str(sub, "component", buf, SPCL_STR_BSIZE) == 2);
     CHECK(strcmp(buf, "Ey") == 0);
     CHECK(spcl_find_float(sub, "wavelength", flts) == 0);
     CHECK(flts[0] == 1.5);
