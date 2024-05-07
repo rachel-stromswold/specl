@@ -251,6 +251,11 @@ void cleanup_spcl_val(spcl_val* o);
  */
 spcl_val copy_spcl_val(const spcl_val o);
 
+/**
+ * This function behaves identically to strcmp, except it uses the internal string representatation for speclang. (strings are fat pointers as opposed to null terminated)
+ */
+int spcl_strcmp(spcl_val a, spcl_val b);
+
 #if SPCL_DEBUG_LVL>0
 /**
  * Recursively print out a spcl_val and the spcl_vals it contains. This is useful for debugging.
@@ -376,7 +381,6 @@ void destroy_spcl_inst(spcl_inst* c);
  */
 #if SPCL_DEBUG_LVL>0
 typedef enum { KEY_NONE, KEY_IMPORT, KEY_CLASS, KEY_IF, KEY_FOR, KEY_ELSE, KEY_WHILE, KEY_BREAK, KEY_CONT, KEY_RET, KEY_FN, SPCL_N_KEYS } spcl_key;
-int spcl_strcmp(spcl_val a, spcl_val b);
 s8 fs_read(const spcl_fstream* fs, lbi s, lbi e);
 spcl_val do_op(struct spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end, spcl_key key);
 read_state make_read_state(const spcl_fstream* fs, lbi s, lbi e);

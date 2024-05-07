@@ -86,7 +86,7 @@ static inline size_t fs_diff(const spcl_fstream* fs, lbi r, lbi l) {
 /**
  * Test whether a > b in asciibetical order. The result should be equivalent to strncmp(a.s, b.s).
  */
-spcl_local int spcl_strcmp(spcl_val a, spcl_val b) {
+int spcl_strcmp(spcl_val a, spcl_val b) {
     size_t n_min = (a.n_els < b.n_els) ? a.n_els : b.n_els;
     for (size i = 0; i < n_min; ++i) {
 	if (a.val.s[i] - b.val.s[i])
