@@ -1,6 +1,10 @@
+#ifndef SPCL_UTILS_H
+#define SPCL_UTILS_H
+
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "s8.h"
 
 #define BLK_MAX			16	//the maximum number of nested blocks
 #define LST_MAX			8	//the maximum number of nested lists for a flatten statement
@@ -205,28 +209,42 @@ inline int write_numeric(char* str, size_t n, double x) {
 
 /**
   * Remove the whitespace surrounding a word
-  * Note: this function performs trimming "in place"
-  * returns: the length of the string including the null terminator
+  * returns: a new string without any of the surrounding whitespace
   */
-static inline char* trim_whitespace(char* str, size_t* len) {
-    if (!str)
-	return NULL;
-    int started = 0;
-    size_t last_non = 0;
-    for (size_t i = 0; str[i]; ++i) {
-        if (!is_whitespace(str[i])) {
+static inline s8 trim_whitespace(s8 str) {
+    s8 ret;
+    ret.s = NULL;
+    ret.n = 0;
+    if (!str.s || str.n == 0)
+	return ret;
+    psize start_ind = -1, last_non = -1;
+    for (psize i = 0; i < str.n; ++i) {
+        if (!is_whitespace(str.s[i])) {
             last_non = i;
-            if (!started && i > 0) {
-		size_t j = 0;
-		for (; str[i+j]; ++j)
-		    str[j] = str[i+j];
-		str[j] = 0;//we must null terminate
-            }
-	    started = 1;
+            if (start_ind < 0)
+		start_ind = i;
         }
     }
-    str[last_non+1] = 0;
-    if (len) *len = last_non + 1;
-    return str;
+    //return an empty string if we didn't find any non-whitespace
+    if (start_ind < 0 || last_non < start_ind)
+	return ret;
+    ret.s = str.s + start_ind;
+    ret.n = last_non - start_ind + 1;
+    return ret;
 }
 
+/**
+ * Acts like strdup for sized strings
+ */
+static inline s8 s8dup(s8 s) {
+    s8 d = (s8){0, NULL};
+    if (!s.s || !s.n)
+	return d;
+    //writing unit tests in c++ was a horrible decision
+    d.s = (u8*)malloc(sizeof(u8)*s.n);
+    d.n = s.n;
+    memcpy(d.s, s.s, sizeof(u8)*s.n);
+    return d;
+}
+
+#endif

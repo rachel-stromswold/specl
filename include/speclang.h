@@ -1,10 +1,10 @@
 #ifndef READ_H
 #define READ_H
 
+#include <stdlib.h>
 #include <errno.h>
 #include <math.h>
 #include <stdarg.h>
-#include <stdlib.h>
 #include <string.h>
 #include "s8.h"
 
@@ -320,7 +320,7 @@ void val_exp(spcl_val* l, spcl_val r);
  * A class which stores a labeled spcl_val.
  */
 typedef struct name_val_pair {
-    char* s;	//the name of the pair
+    s8 s;	//the name of the pair
     spcl_val v;	//the spcl_val
 } name_val_pair;
 struct name_val_pair make_name_val_pair(const char* p_name, spcl_val p_val);

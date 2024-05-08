@@ -8,6 +8,22 @@ extern "C" {
 }
 #define STRIFY(S) #S
 
+class s8cpp {
+private:
+    char* mem;
+public:
+    s8 str;
+    s8cpp(std::string p_str) {
+	str.n = p_str.size();
+	mem = strdup(p_str.c_str());
+	str.s = mem;
+    }
+    ~s8cpp() {
+	free(mem);
+	str.n = 0;
+    }
+};
+
 void test_num(spcl_val v, double x) {
     CHECK(v.type == VAL_NUM);
     CHECK(v.val.x == x);
@@ -52,17 +68,26 @@ void mean_var(const double* x, size_t n, double* mean, double* var, size_t dim=1
 }
 
 TEST_CASE("namecmp") {
-    CHECK(namecmp("foo", "foo", 3) == 0);
-    CHECK(namecmp("foo", "foot", 2) == 0);
-    CHECK(namecmp("foo", "foot", 3) != 0);
-    CHECK(namecmp("foo", "bar", 3) != 0);
+    s8cpp s8ta("ta ");
+    s8cpp s8tan("tan");
+    s8cpp s8foo("foo");
+    s8cpp s8bar("bar");
+    s8cpp s8foot("foot");
+    s8cpp s8foop("foo+");
+    s8cpp s8mfoop("-foo+");
+    s8cpp s8foo_("foo ");
+    s8cpp s8tfoo_("\tfoo ");
 
-    CHECK(namecmp("foo ", "foo", 3) == 0);
-    CHECK(namecmp("foo ", "foo", SIZE_MAX) == 0);
-    CHECK(namecmp("foo ", "foo+", 3) == 0);
-    CHECK(namecmp("\tfoo ", "foo", 3) == 0);
-    CHECK(namecmp("foo ", "-foo+", 3) == 0);
-    CHECK(namecmp("ta ", "tan", 2) != 0);
+    CHECK(namecmp(s8foo.str.s, s8foo.str.s, 3) == 0);		// "foo"[:3] is "foo"
+    CHECK(namecmp(s8foo.str.s, s8foot.str.s, 2) == 0);		// "foo"[:2] is "foo"
+    CHECK(namecmp(s8foo.str.s, s8foot.str.s, 3) != 0);		// "foo"[:3] isn't "foot"
+    CHECK(namecmp(s8foo.str.s, s8bar.str.s, 3) != 0);		// "foo"[:3] isn't "bar"
+    CHECK(namecmp(s8foo_.str.s, s8foo.str.s, 3) == 0);		// "foo "[:3] is "bar"
+    CHECK(namecmp(s8foo_.str.s, s8foo.str.s, SIZE_MAX) == 0);	// "foo "[:2^64-1] is "foo"
+    CHECK(namecmp(s8foo_.str.s, s8foop.str.s, 3) == 0);		// "foo "[:3] is "foo+"
+    CHECK(namecmp(s8tfoo_.str.s, s8foo.str.s, 3) == 0);		// "\tfoo"[:3] is "foo+"
+    CHECK(namecmp(s8foo_.str.s, s8mfoop.str.s, 3) == 0);	// "foo"[:3] is "-foo+"
+    CHECK(namecmp(s8ta.str.s, s8tan.str.s, 2) != 0);		// "ta"[:2] is "tan"
 }
 
 TEST_CASE("spcl_val parsing") {
