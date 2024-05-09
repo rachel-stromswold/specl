@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include "speclang.h"
 
-int main(int argc, char** argv) {
+int main(int argc, const char** argv) {
     if (argc < 2)
 	fprintf(stderr, "usage: spcl <filename>\n");
     char* fname = argv[1];

@@ -8,6 +8,9 @@ extern "C" {
 }
 #define STRIFY(S) #S
 
+//this is equivalent to strncpy but safe. i.e. it is always gauranteed to have a null terminator
+#define safecpy(dst,src,n) strncpy(dst, src, n);dst[n-1] = 0;
+
 class s8cpp {
 private:
     char* mem;
@@ -97,58 +100,58 @@ TEST_CASE("spcl_val parsing") {
 
     SUBCASE("Reading numbers to spcl_vals works") {
 	//test integers
-	strncpy(buf, "1", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "1", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 1);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "12", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "12", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 12);
 	cleanup_spcl_val(&tmp_val);
 	//test floats
-	strncpy(buf, ".25", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, ".25", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, .25);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "+1.25", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "+1.25", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 1.25);
 	cleanup_spcl_val(&tmp_val);
 	//test scientific notation
-	strncpy(buf, ".25e10", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, ".25e10", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 0.25e10);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "1.25e+10", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "1.25e+10", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 1.25e10);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "-1.25e-10", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "-1.25e-10", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, -1.25e-10);
 	cleanup_spcl_val(&tmp_val);
     }
     SUBCASE("Reading strings to spcl_vals works") {
 	//test a simple string
-	strncpy(buf, "\"foo\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "\"foo\"", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_STR);
 	CHECK(spcl_strcmp(tmp_val, cstr_to_spcl("foo")) == 0);
 	cleanup_spcl_val(&tmp_val);
 	//test a string with whitespace
-	strncpy(buf, "\" foo bar \"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "\" foo bar \"", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_STR);
 	CHECK(spcl_strcmp(tmp_val, cstr_to_spcl(" foo bar ")) == 0);
 	cleanup_spcl_val(&tmp_val);
 	//test a string with stuff inside it
-	strncpy(buf, "\"foo(bar)\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "\"foo(bar)\"", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_STR);
 	CHECK(spcl_strcmp(tmp_val, cstr_to_spcl("foo(bar)")) == 0);
 	cleanup_spcl_val(&tmp_val);
 	//test a string with an escaped string
-	strncpy(buf, "\"foo\\\"bar\\\" \"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "\"foo\\\"bar\\\" \"", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_STR);
 	CHECK(spcl_strcmp(tmp_val, cstr_to_spcl("foo\"bar\" ")) == 0);
@@ -156,7 +159,7 @@ TEST_CASE("spcl_val parsing") {
     }
     SUBCASE("Reading lists to spcl_vals works") {
 	//test one element lists
-	strncpy(buf, "[\"foo\"]", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "[\"foo\"]", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_LIST);
 	CHECK(tmp_val.val.l != NULL);
@@ -165,7 +168,7 @@ TEST_CASE("spcl_val parsing") {
 	CHECK(spcl_strcmp(tmp_val.val.l[0], cstr_to_spcl("foo")) == 0);
 	cleanup_spcl_val(&tmp_val);
 	//test two element lists
-	strncpy(buf, "[\"foo\", 1]", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "[\"foo\", 1]", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_LIST);
 	CHECK(tmp_val.val.l != NULL);
@@ -176,7 +179,7 @@ TEST_CASE("spcl_val parsing") {
 	CHECK(tmp_val.val.l[1].val.x == 1);
 	cleanup_spcl_val(&tmp_val);
 	//test lists of lists
-	strncpy(buf, "[[1,2,3], [\"4\", \"5\", \"6\"]]", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "[[1,2,3], [\"4\", \"5\", \"6\"]]", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_LIST);
 	CHECK(tmp_val.val.l != NULL);
@@ -209,7 +212,7 @@ TEST_CASE("spcl_val parsing") {
     }
     SUBCASE("Reading vectors to spcl_vals works") {
 	//test one element lists
-	strncpy(buf, "vec(1.2, 3.4,56.7)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "vec(1.2, 3.4,56.7)", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_ARRAY);
 	CHECK(tmp_val.val.a != NULL);
@@ -218,7 +221,7 @@ TEST_CASE("spcl_val parsing") {
 	CHECK(tmp_val.val.a[2] == doctest::Approx(56.7));
 	cleanup_spcl_val(&tmp_val);
 
-	strncpy(buf, "array([1.2, 3.4,56.7])", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "array([1.2, 3.4,56.7])", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_ARRAY);
 	CHECK(tmp_val.val.a != NULL);
@@ -227,7 +230,7 @@ TEST_CASE("spcl_val parsing") {
 	CHECK(tmp_val.val.a[2] == doctest::Approx(56.7));
 	cleanup_spcl_val(&tmp_val);
 
-	strncpy(buf, "array([[0, 1, 2], [3, 4, 5], [6, 7, 8]])", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "array([[0, 1, 2], [3, 4, 5], [6, 7, 8]])", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_MAT);
 	REQUIRE(tmp_val.val.l != NULL);
@@ -253,12 +256,12 @@ TEST_CASE("string handling") {
     CHECK(tmp_val.type == VAL_UNDEF);
     CHECK(tmp_val.n_els == 0);
     cleanup_spcl_val(&tmp_val);
-    strncpy(buf, " ", STR_SIZE);
+    safecpy(buf, " ", STR_SIZE);
     tmp_val = spcl_parse_line(sc, buf);
     CHECK(tmp_val.type == VAL_UNDEF);
     CHECK(tmp_val.n_els == 0);
     cleanup_spcl_val(&tmp_val);
-    strncpy(buf, "\t  \t\n", STR_SIZE);
+    safecpy(buf, "\t  \t\n", STR_SIZE);
     tmp_val = spcl_parse_line(sc, buf);
     CHECK(tmp_val.type == VAL_UNDEF);
     CHECK(tmp_val.n_els == 0);
@@ -283,41 +286,41 @@ TEST_CASE("operations") {
     char buf[SPCL_STR_BSIZE];
     SUBCASE("Arithmetic works") {
         //single operations
-        strncpy(buf, "1+1.1", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "1+1.1", SPCL_STR_BSIZE);
         spcl_val tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 2.1);
-        strncpy(buf, "2-1.25", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "2-1.25", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 0.75);
-        strncpy(buf, "2*1.1", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "2*1.1", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 2.2);
-        strncpy(buf, "2.2/2", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "2.2/2", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 1.1);
         //order of operations
-        strncpy(buf, "2*2-1", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "2*2-1", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 3);
-        strncpy(buf, "1+3/2", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "1+3/2", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 2.5);
-        strncpy(buf, "(1+3)/2", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "(1+3)/2", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 2.0);
-        strncpy(buf, "-(1+3)/2", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "-(1+3)/2", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, -2.0);
-        strncpy(buf, "2*9/4*3", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "2*9/4*3", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 1.5);
-	strncpy(buf, "2^-4", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "2^-4", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 0.0625);
-	strncpy(buf, "-2*9^2/4*3", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "-2*9^2/4*3", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, -13.5);
-	strncpy(buf, "(-2*9)^2/4*3", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "(-2*9)^2/4*3", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 27);
     }
@@ -343,7 +346,7 @@ TEST_CASE("operations") {
     }
     SUBCASE("String concatenation works") {
         //single operations
-        strncpy(buf, "\"foo\"+\"bar\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "\"foo\"+\"bar\"", SPCL_STR_BSIZE);
         spcl_val tmp_val = spcl_parse_line(sc, buf);
         CHECK(tmp_val.type == VAL_STR);
         CHECK(spcl_strcmp(tmp_val, cstr_to_spcl("foobar")) == 0);
@@ -363,37 +366,51 @@ TEST_CASE("operations") {
 	CHECK(spcl_test(sc, "true && true") == 1);
 	CHECK(spcl_test(sc, "!false") == 1);
 	CHECK(spcl_test(sc, "!true") == 0);
+	//short circuiting && statements work (if the second branch is evaluated an error will occur)
+	safecpy(buf, "(this_should_be_undefined == bar)", SPCL_STR_BSIZE);
+	spcl_val v = spcl_parse_line(sc, buf);
+	CHECK(v.type == VAL_ERR);
+	safecpy(buf, "(false && this_should_be_undefined == bar)", SPCL_STR_BSIZE);
+	v = spcl_parse_line(sc, buf);
+	test_num(v, 0);
+	//short circuiting || statements works (if the second branch is evaluated an error will occur)
+	safecpy(buf, "(this_should_be_undefined == bar)", SPCL_STR_BSIZE);
+	v = spcl_parse_line(sc, buf);
+	CHECK(v.type == VAL_ERR);
+	safecpy(buf, "(true || this_should_be_undefined == bar)", SPCL_STR_BSIZE);
+	v = spcl_parse_line(sc, buf);
+	test_num(v, 1);
     }
     SUBCASE("Ternary operators work") {
-	strncpy(buf, "(false) ? 100 : 200", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "(false) ? 100 : 200", SPCL_STR_BSIZE);
 	spcl_val tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 200);
-	strncpy(buf, "(true) ? 100 : 200", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "(true) ? 100 : 200", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 100);
-	strncpy(buf, "(1 == 2) ? 100 : 200", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "(1 == 2) ? 100 : 200", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 200);
-	strncpy(buf, "(2 == 2) ? 100 : 200", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "(2 == 2) ? 100 : 200", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 100);
-	strncpy(buf, "(1 > 2) ? 100 : 200", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "(1 > 2) ? 100 : 200", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 200);
-	strncpy(buf, "(1 < 2) ? 100 : 200", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "(1 < 2) ? 100 : 200", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 100);
 	//check with pairs of strings
-	strncpy(buf, "(1 < 2) ? \"100\" : \"200\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "(1 < 2) ? \"100\" : \"200\"", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_STR);
 	CHECK(spcl_strcmp(tmp_val, cstr_to_spcl("100")) == 0);
-	strncpy(buf, "(1 > 2) ? \"100\" : \"200\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "(1 > 2) ? \"100\" : \"200\"", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_STR);
 	CHECK(spcl_strcmp(tmp_val, cstr_to_spcl("200")) == 0);
 	//test graceful failure conditions
-	strncpy(buf, "(1 < 2) ? 100", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "(1 < 2) ? 100", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_BAD_SYNTAX);
@@ -402,42 +419,42 @@ TEST_CASE("operations") {
 	cleanup_spcl_val(&tmp_val);
     }
     SUBCASE("Missing end graceful failure") {
-	strncpy(buf, "[1,2", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "[1,2", SPCL_STR_BSIZE);
 	spcl_val tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_BAD_SYNTAX);
 	INFO("message=", tmp_val.val.e->msg);
 	WARN(strcmp(tmp_val.val.e->msg, "expected ]") == 0);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "a(1,2", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "a(1,2", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_BAD_SYNTAX);
 	INFO("message=", tmp_val.val.e->msg);
 	WARN(strcmp(tmp_val.val.e->msg, "expected )") == 0);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "\"1,2", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "\"1,2", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_BAD_SYNTAX);
 	INFO("message=", tmp_val.val.e->msg);
 	WARN(strcmp(tmp_val.val.e->msg, "expected \"") == 0);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "1,2]", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "1,2]", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_BAD_SYNTAX);
 	INFO("message=", tmp_val.val.e->msg);
 	WARN(strcmp(tmp_val.val.e->msg, "unexpected ]") == 0);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "1,2)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "1,2)", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_BAD_SYNTAX);
 	INFO("message=", tmp_val.val.e->msg);
 	WARN(strcmp(tmp_val.val.e->msg, "unexpected )") == 0);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "1,2\"", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "1,2\"", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_BAD_SYNTAX);
@@ -452,7 +469,7 @@ TEST_CASE("list interpretations") {
     char buf[SPCL_STR_BSIZE];
     spcl_inst* sc = make_spcl_inst(NULL);
     //test lists interpretations
-    strncpy(buf, "[[i*2 for i in range(2)], [i*2-1 for i in range(1,3)], [x for x in range(1,3,0.5)]]", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+    safecpy(buf, "[[i*2 for i in range(2)], [i*2-1 for i in range(1,3)], [x for x in range(1,3,0.5)]]", SPCL_STR_BSIZE);
     spcl_val tmp_val = spcl_parse_line(sc, buf);
     CHECK(tmp_val.type == VAL_LIST);
     CHECK(tmp_val.val.l != NULL);
@@ -492,7 +509,7 @@ TEST_CASE("list interpretations") {
     }
     cleanup_spcl_val(&tmp_val);
     //test nested list interpretations
-    strncpy(buf, "[[x*y for x in range(1,6)] for y in range(5)]", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+    safecpy(buf, "[[x*y for x in range(1,6)] for y in range(5)]", SPCL_STR_BSIZE);
     tmp_val = spcl_parse_line(sc, buf);
     REQUIRE(tmp_val.type == VAL_LIST);
     REQUIRE(tmp_val.val.l != NULL);
@@ -514,21 +531,21 @@ TEST_CASE("builtin functions") {
     spcl_inst* sc = make_spcl_inst(NULL);
 
     SUBCASE("range()") {
-	strncpy(buf, "range(4)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "range(4)", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_ARRAY);
 	CHECK(tmp_val.n_els == 4);
 	for (size_t i = 0; i < 4; ++i)
 	    CHECK(tmp_val.val.a[i] == i);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "range(1,4)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "range(1,4)", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_ARRAY);
 	CHECK(tmp_val.n_els == 3);
 	for (size_t i = 0; i < 3; ++i)
 	    CHECK(tmp_val.val.a[i] == i+1);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "range(1,4,0.5)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "range(1,4,0.5)", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_ARRAY);
 	CHECK(tmp_val.n_els == 6);
@@ -536,35 +553,35 @@ TEST_CASE("builtin functions") {
 	    CHECK(tmp_val.val.a[i] == 0.5*i+1);
 	cleanup_spcl_val(&tmp_val);
         //graceful failure cases
-        strncpy(buf, "range()", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "range()", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
         WARN(tmp_val.val.e->c == E_LACK_TOKENS);
 	cleanup_spcl_val(&tmp_val);
 	//check that divisions by zero are avoided
-        strncpy(buf, "range(0,1,0)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "range(0,1,0)", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
         WARN(tmp_val.val.e->c == E_BAD_VALUE);
 	cleanup_spcl_val(&tmp_val);
-        strncpy(buf, "range(\"1\")", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "range(\"1\")", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
         WARN(tmp_val.val.e->c == E_BAD_TYPE);
 	cleanup_spcl_val(&tmp_val);
-        strncpy(buf, "range(0.5,\"1\")", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "range(0.5,\"1\")", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
         WARN(tmp_val.val.e->c == E_BAD_TYPE);
 	cleanup_spcl_val(&tmp_val);
-        strncpy(buf, "range(0.5,1,\"2\")", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "range(0.5,1,\"2\")", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
         WARN(tmp_val.val.e->c == E_BAD_TYPE);
 	cleanup_spcl_val(&tmp_val);
     }
     SUBCASE("linspace()") {
-        strncpy(buf, "linspace(1,2,5)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "linspace(1,2,5)", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
         CHECK(tmp_val.type == VAL_ARRAY);
         CHECK(tmp_val.n_els == 5);
@@ -572,7 +589,7 @@ TEST_CASE("builtin functions") {
             CHECK(tmp_val.val.a[i] == 1.0+0.25*i);
         }
         cleanup_spcl_val(&tmp_val);
-        strncpy(buf, "linspace(2,1,5)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "linspace(2,1,5)", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
         CHECK(tmp_val.type == VAL_ARRAY);
         CHECK(tmp_val.n_els == 5);
@@ -581,39 +598,39 @@ TEST_CASE("builtin functions") {
         }
         cleanup_spcl_val(&tmp_val);
         //graceful failure cases
-        strncpy(buf, "linspace(2,1)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "linspace(2,1)", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
         WARN(tmp_val.val.e->c == E_LACK_TOKENS);
 	cleanup_spcl_val(&tmp_val);
-        strncpy(buf, "linspace(2,1,1)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "linspace(2,1,1)", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
         WARN(tmp_val.val.e->c == E_BAD_VALUE);
 	cleanup_spcl_val(&tmp_val);
-        strncpy(buf, "linspace(\"2\",1,1)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "linspace(\"2\",1,1)", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
         WARN(tmp_val.val.e->c == E_BAD_TYPE);
 	cleanup_spcl_val(&tmp_val);
-        strncpy(buf, "linspace(2,\"1\",1)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "linspace(2,\"1\",1)", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
         WARN(tmp_val.val.e->c == E_BAD_TYPE);
 	cleanup_spcl_val(&tmp_val);
-        strncpy(buf, "linspace(2,1,\"1\")", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+        safecpy(buf, "linspace(2,1,\"1\")", SPCL_STR_BSIZE);
         tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
         WARN(tmp_val.val.e->c == E_BAD_TYPE);
 	cleanup_spcl_val(&tmp_val);
     }
     SUBCASE("flatten()") {
-	strncpy(buf, "flatten([])", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "flatten([])", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_LIST);
 	CHECK(tmp_val.n_els == 0);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "flatten([1,2,3])", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "flatten([1,2,3])", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_LIST);
 	CHECK(tmp_val.n_els == 3);
@@ -621,7 +638,7 @@ TEST_CASE("builtin functions") {
 	    test_num(tmp_val.val.l[i], i+1);
 	}
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "flatten([[1,2,3],[4,5],6])", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "flatten([[1,2,3],[4,5],6])", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_LIST);
 	CHECK(tmp_val.n_els == 6);
@@ -630,157 +647,171 @@ TEST_CASE("builtin functions") {
 
 	cleanup_spcl_val(&tmp_val);
     }
+    SUBCASE("len") {
+	safecpy(buf, "len(1)", SPCL_STR_BSIZE);
+	tmp_val = spcl_parse_line(sc, buf);
+	test_num(tmp_val, 1);
+	safecpy(buf, "len([1,2,3])", SPCL_STR_BSIZE);
+	tmp_val = spcl_parse_line(sc, buf);
+	test_num(tmp_val, 3);
+	safecpy(buf, "len(range(4))", SPCL_STR_BSIZE);
+	tmp_val = spcl_parse_line(sc, buf);
+	test_num(tmp_val, 4);
+	safecpy(buf, "len(vec(1,2,3))", SPCL_STR_BSIZE);
+	tmp_val = spcl_parse_line(sc, buf);
+	test_num(tmp_val, 3);
+    }
     SUBCASE("math functions") {
-	strncpy(buf, "math.sin(3.1415926535/2)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.sin(3.1415926535/2)", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_NUM);
 	CHECK(tmp_val.val.x == doctest::Approx(1.0));
 	CHECK(tmp_val.n_els == 1);
-	strncpy(buf, "math.sin(3.1415926535/6)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.sin(3.1415926535/6)", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_NUM);
 	CHECK(tmp_val.val.x == doctest::Approx(0.5));
 	CHECK(tmp_val.n_els == 1);
-	strncpy(buf, "math.cos(3.1415926535/2)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.cos(3.1415926535/2)", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_NUM);
 	CHECK(tmp_val.val.x == doctest::Approx(0.0));
 	CHECK(tmp_val.n_els == 1);
-	strncpy(buf, "math.cos(3.1415926535/6)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.cos(3.1415926535/6)", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_NUM);
 	CHECK(tmp_val.n_els == 1);
-	strncpy(buf, "math.sqrt(3)/2", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.sqrt(3)/2", SPCL_STR_BSIZE);
 	spcl_val sqrt_val = spcl_parse_line(sc, buf);
 	CHECK(sqrt_val.type == VAL_NUM);
 	CHECK(tmp_val.n_els == 1);
 	CHECK(tmp_val.val.x == doctest::Approx(sqrt_val.val.x));
-	strncpy(buf, "math.tan(3.141592653589793/4)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.tan(3.141592653589793/4)", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_NUM);
 	CHECK(tmp_val.n_els == 1);
 	CHECK(tmp_val.val.x == doctest::Approx(1.0));
-	strncpy(buf, "math.tan(0)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.tan(0)", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_NUM);
 	CHECK(tmp_val.n_els == 1);
 	CHECK(tmp_val.val.x == doctest::Approx(0.0));
-	strncpy(buf, "math.exp(0)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.exp(0)", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_NUM);
 	CHECK(tmp_val.val.x == doctest::Approx(1.0));
 	CHECK(tmp_val.n_els == 1);
-	strncpy(buf, "math.exp(1)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.exp(1)", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_NUM);
 	CHECK(tmp_val.val.x == doctest::Approx(2.718281828));
 	CHECK(tmp_val.n_els == 1);
-	strncpy(buf, "math.log(1)", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.log(1)", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	CHECK(tmp_val.type == VAL_NUM);
 	CHECK(tmp_val.val.x == 0);
 	CHECK(tmp_val.n_els == 1);
 	//failure conditions
-	strncpy(buf, "math.sin()", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.sin()", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_LACK_TOKENS);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "math.cos()", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.cos()", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_LACK_TOKENS);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "math.tan()", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.tan()", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_LACK_TOKENS);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "math.exp()", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.exp()", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_LACK_TOKENS);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "math.sqrt()", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.sqrt()", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_LACK_TOKENS);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "math.sin(\"a\")", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.sin(\"a\")", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_BAD_TYPE);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "math.cos(\"a\")", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.cos(\"a\")", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_BAD_TYPE);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "math.tan(\"a\")", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.tan(\"a\")", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_BAD_TYPE);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "math.exp(\"a\")", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.exp(\"a\")", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_BAD_TYPE);
 	cleanup_spcl_val(&tmp_val);
-	strncpy(buf, "math.sqrt(\"a\")", SPCL_STR_BSIZE);buf[SPCL_STR_BSIZE-1] = 0;
+	safecpy(buf, "math.sqrt(\"a\")", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_ERR);
 	WARN(tmp_val.val.e->c == E_BAD_TYPE);
 	cleanup_spcl_val(&tmp_val);
     }
     SUBCASE("assertions") {
-	strncpy(buf, "assert(1)", SPCL_STR_BSIZE);
+	safecpy(buf, "assert(1)", SPCL_STR_BSIZE);
 	spcl_val tmp = spcl_parse_line(sc, buf);
 	CHECK(tmp.type == VAL_NUM);
 	CHECK(tmp.val.x == 1);
 	CHECK(tmp.n_els == 1);
 	cleanup_spcl_val(&tmp);
-	strncpy(buf, "assert(true)", SPCL_STR_BSIZE);
+	safecpy(buf, "assert(true)", SPCL_STR_BSIZE);
 	tmp = spcl_parse_line(sc, buf);
 	CHECK(tmp.type == VAL_NUM);
 	CHECK(tmp.val.x == 1);
 	cleanup_spcl_val(&tmp);
-	strncpy(buf, "assert(false)", SPCL_STR_BSIZE);
+	safecpy(buf, "assert(false)", SPCL_STR_BSIZE);
 	tmp = spcl_parse_line(sc, buf);
 	CHECK(tmp.type == VAL_ERR);
 	WARN(tmp.val.e->c == E_ASSERT);
 	cleanup_spcl_val(&tmp);
-	strncpy(buf, "assert(1 <= 3)", SPCL_STR_BSIZE);
+	safecpy(buf, "assert(1 <= 3)", SPCL_STR_BSIZE);
 	tmp = spcl_parse_line(sc, buf);
 	CHECK(tmp.type == VAL_NUM);
 	CHECK(tmp.val.x != 0);
 	cleanup_spcl_val(&tmp);
-	strncpy(buf, "assert(1 == 1)", SPCL_STR_BSIZE);
+	safecpy(buf, "assert(len([0]) == 1)", SPCL_STR_BSIZE);
 	tmp = spcl_parse_line(sc, buf);
 	CHECK(tmp.type == VAL_NUM);
 	CHECK(tmp.val.x != 0);
 	cleanup_spcl_val(&tmp);
-	strncpy(buf, "assert(1 > 3, \"1 is not greater than 3\")", SPCL_STR_BSIZE);
+	safecpy(buf, "assert(1 > 3, \"1 is not greater than 3\")", SPCL_STR_BSIZE);
 	tmp = spcl_parse_line(sc, buf);
 	CHECK(tmp.type == VAL_ERR);
 	WARN(tmp.val.e->c == E_ASSERT);
 	WARN(strcmp(tmp.val.e->msg, "1 is not greater than 3") == 0);
 	cleanup_spcl_val(&tmp);
-	strncpy(buf, "isdef(apple)", SPCL_STR_BSIZE);
+	safecpy(buf, "isdef(apple)", SPCL_STR_BSIZE);
 	tmp = spcl_parse_line(sc, buf);
 	CHECK(tmp.type == VAL_NUM);
 	CHECK(tmp.val.x == 0);
 	cleanup_spcl_val(&tmp);
-	strncpy(buf, "isdef(math.pi)", SPCL_STR_BSIZE);
+	safecpy(buf, "isdef(math.pi)", SPCL_STR_BSIZE);
 	tmp = spcl_parse_line(sc, buf);
 	CHECK(tmp.type == VAL_NUM);
 	CHECK(tmp.val.x == 1);
 	cleanup_spcl_val(&tmp);
-	strncpy(buf, "assert(apple)", SPCL_STR_BSIZE);
+	safecpy(buf, "assert(apple)", SPCL_STR_BSIZE);
 	tmp = spcl_parse_line(sc, buf);
 	CHECK(tmp.type == VAL_ERR);
 	WARN(tmp.val.e->c == E_ASSERT);
 	cleanup_spcl_val(&tmp);
-	strncpy(buf, "assert(isdef(apple))", SPCL_STR_BSIZE);
+	safecpy(buf, "assert(isdef(apple))", SPCL_STR_BSIZE);
 	tmp = spcl_parse_line(sc, buf);
 	CHECK(tmp.type == VAL_ERR);
 	WARN(tmp.val.e->c == E_ASSERT);
@@ -1254,6 +1285,7 @@ TEST_CASE("file importing") {
     CHECK(tmp == 2);
     CHECK(spcl_find_int(v.val.c, "b1", &tmp) >= 0);
     CHECK(tmp == 0);
+    CHECK(spcl_test(v.val.c, "len(argv) == 2"));
     CHECK(spcl_test(v.val.c, "argv[1] == \"r\""));
     cleanup_spcl_val(&v);
 }

@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "s8.h"
 
 #define BLK_MAX			16	//the maximum number of nested blocks
@@ -237,7 +238,7 @@ static inline s8 trim_whitespace(s8 str) {
  * Acts like strdup for sized strings
  */
 static inline s8 s8dup(s8 s) {
-    s8 d = (s8){0, NULL};
+    s8 d = (s8){NULL, 0};
     if (!s.s || !s.n)
 	return d;
     //writing unit tests in c++ was a horrible decision

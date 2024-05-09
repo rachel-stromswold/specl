@@ -9,6 +9,9 @@ static const char* const errnames[N_ERRORS] =
 {"SUCCESS", "NO_FILE", "LACK_TOKENS", "BAD_SYNTAX", "BAD_VALUE", "BAD_TYPE", "NOMEM", "NAN", "UNDEFINED_TOKEN", "OUT_OF_BOUNDS", "ASSERT"};
 static const char* const valnames[N_VALTYPES] = {"none", "error", "numeric", "string", "array", "list", "fn", "obj"};
 
+#define spcl_isfalse(v) (v.type == VAL_UNDEF || (v.type == VAL_NUM && v.val.x == 0) || v.n_els == 0)
+#define spcl_istrue(v) (!spcl_isfalse(v))
+
 //dumb forward declarations
 static inline lbi fs_end(const spcl_fstream* fs) {
     return make_lbi(fs->n_lines, 0);
@@ -329,7 +332,6 @@ spcl_fstream* make_spcl_fstreamn(const char* p_fname, size_t n) {
         fclose(fp);
 	return fs;
     }
-    fprintf(stderr, "Error: couldn't open file %s for reading!\n", p_fname);
     return NULL;
 }
 spcl_fstream* copy_spcl_fstream(const spcl_fstream* o) {
@@ -1533,8 +1535,8 @@ static inline int find_ind(const struct spcl_inst* c, s8 name, size_t* ind) {
     size_t ii = fnv_1(name, c->t_bits);
     size_t i = ii;
     while (c->table[i].s.n) {
-	//if (namecmp(name.s, c->table[i].s.s, name.n) == 0) {
-	if (s8cmp(name, c->table[i].s) == 0) {
+	//if (s8cmp(name, c->table[i].s) == 0) {
+	if (s8eq(name, c->table[i].s)) {
 	    *ind = i;
 	    return 1;
 	}
@@ -1943,6 +1945,12 @@ spcl_local spcl_val do_op(spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end,
     spcl_val l = spcl_parse_line_rs(c, rs_l, NULL, KEY_NONE);
     if (l.type == VAL_ERR)
 	return l;
+    //logic for short circuiting && statements
+    if (op == '&' && next == op && spcl_isfalse(l))
+	return spcl_make_num(0);
+    //logic for short circuiting || statements
+    if (op == '|' && next == op && spcl_istrue(l))
+	return spcl_make_num(1);
     spcl_val r = spcl_parse_line_rs(c, rs_r, new_end, KEY_NONE);
     if (r.type == VAL_ERR) {
 	cleanup_spcl_val(&l);
@@ -2580,7 +2588,6 @@ spcl_val spcl_inst_from_file(const char* fname, int argc, const char** argv) {
     spcl_val ret = {0};
     //create a new spcl_inst
     spcl_inst* c = make_spcl_inst(NULL);
-    spcl_fstream* fs;
     if (argc > 0 && argv) {
 	//create a buffer that we'll populate with [argv[0], argv[1], ...]
 	int tmp_n = SPCL_STR_BSIZE;
@@ -2619,21 +2626,13 @@ spcl_val spcl_inst_from_file(const char* fname, int argc, const char** argv) {
 	ret = spcl_parse_line(c, tmp_str);
 	xfree(tmp_str);
 	
-	/*fs = make_spcl_fstreamn(NULL, 0);
-	spcl_fstream_append(fs, "argv=[");
-	for (int i = 0; i < argc; ++i) {
-	    spcl_fstream_append(fs, argv[i]);
-	    spcl_fstream_append(fs, (i+1 < argc) ? "," : "]");
-	}
-	ret = spcl_read_lines(c, fs);
-	destroy_spcl_fstream(fs);*/
 	if (ret.type == VAL_ERR) {
 	    destroy_spcl_inst(c);
 	    return ret;
 	}
     }
     //read the rest of the file and check to ensure the file was opened successfully
-    fs = make_spcl_fstream(fname);
+    spcl_fstream* fs = make_spcl_fstream(fname);
     if (fs) {
 	ret = spcl_read_lines(c, fs);
 	if (!ret.type) {
@@ -2641,10 +2640,10 @@ spcl_val spcl_inst_from_file(const char* fname, int argc, const char** argv) {
 	    ret.n_els = 1;
 	    ret.val.c = c;
 	}
+	destroy_spcl_fstream(fs);
     } else {
 	ret = spcl_make_err(E_BAD_VALUE, "couldn't open file %s", fname);
     }
-    destroy_spcl_fstream(fs);
     return ret;
 }
 
@@ -2692,7 +2691,8 @@ static inline spcl_val spcl_make_fn_rs(read_state rs, lbi* arg_inds, size_t n_ar
     sto.val.f->code_lines = fs_get_enclosed(rs.b, fs_add(rs.b, open_ind, 1), close_ind);
     sto.val.f->exec = NULL;
     //we change the parent in spcl_uf_eval, so we just set NULL to be a dummy
-    sto.val.f->fn_scope = make_spcl_inst(0x01);
+    //sto.val.f->fn_scope = make_spcl_inst(0x01);
+    sto.val.f->fn_scope = make_spcl_inst(NULL);
     return sto;
 }
 spcl_uf* make_spcl_uf_ex(spcl_val (*p_exec)(spcl_inst*, spcl_fn_call)) {

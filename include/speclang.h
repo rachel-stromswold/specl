@@ -5,7 +5,6 @@
 #include <errno.h>
 #include <math.h>
 #include <stdarg.h>
-#include <string.h>
 #include "s8.h"
 
 //hints for dynamic buffer sizes
