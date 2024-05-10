@@ -33,8 +33,6 @@
 #define spcl_local
 #endif
 
-#define cstr_to_spcl(s)	spcl_make_str(s, sizeof(s)-1)
-
 //forward declarations
 struct spcl_val;
 struct spcl_inst;

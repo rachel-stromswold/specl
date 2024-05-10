@@ -11,6 +11,14 @@ extern "C" {
 //this is equivalent to strncpy but safe. i.e. it is always gauranteed to have a null terminator
 #define safecpy(dst,src,n) strncpy(dst, src, n);dst[n-1] = 0;
 
+spcl_val cstr_to_spcl(const char* str) {
+    spcl_val v;
+    v.type = VAL_STR;
+    v.n_els = strlen(str);
+    v.val.s = const_cast<char*>(str);
+    return v;
+}
+
 class s8cpp {
 private:
     char* mem;
@@ -405,10 +413,12 @@ TEST_CASE("operations") {
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_STR);
 	CHECK(spcl_strcmp(tmp_val, cstr_to_spcl("100")) == 0);
+	cleanup_spcl_val(&tmp_val);
 	safecpy(buf, "(1 > 2) ? \"100\" : \"200\"", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	REQUIRE(tmp_val.type == VAL_STR);
 	CHECK(spcl_strcmp(tmp_val, cstr_to_spcl("200")) == 0);
+	cleanup_spcl_val(&tmp_val);
 	//test graceful failure conditions
 	safecpy(buf, "(1 < 2) ? 100", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);

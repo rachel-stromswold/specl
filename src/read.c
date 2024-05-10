@@ -927,8 +927,10 @@ spcl_val spcl_make_str(const char* s, size_t n) {
     spcl_val v;
     v.type = VAL_STR;
     v.n_els = n;
-    v.val.s = xmalloc(sizeof(char)*v.n_els);
+    //we allocate one more than the actual length to null terminate
+    v.val.s = xmalloc(sizeof(char)*(v.n_els+1));
     memcpy(v.val.s, s, n);
+    v.val.s[n] = 0;
     return v;
 }
 spcl_val spcl_make_array(double* vs, size_t n) {
@@ -1274,7 +1276,7 @@ spcl_local void val_add(spcl_val* l, spcl_val r) {
 	size_t l_len = l->n_els;
 	size_t r_len = spcl_est_strlen(r);
 	//create a new string and copy
-	l->val.s = xrealloc(l->val.s, l_len+r_len);//l_len already includes null terminator so we have enough
+	l->val.s = xrealloc(l->val.s, l_len+r_len+1); //+1 for null terminator
 	char* tmp = spcl_stringify(r, l->val.s+l_len, r_len);
 	tmp[0] = 0;
 	//now set the spcl_val
@@ -1508,7 +1510,7 @@ static inline size_t fnv_1(s8 str, unsigned char t_bits) {
     if (str.s == NULL || str.n == 0)
 	return 0;
     size_t ret = FNV_OFFSET;
-    for (size_t i = 0; str.s[i] && i < str.n; ++i) {
+    for (size_t i = 0; i < str.n/* && str.s[i]*/; ++i) {
 	if (!is_whitespace(str.s[i])) {
 	    ret = ret^str.s[i];
 	    ret = ret*FNV_PRIME;
@@ -1598,6 +1600,7 @@ static inline void setup_builtins(struct spcl_inst* c) {
     spcl_add_fn(c, spcl_vec,		"vec");
     spcl_add_fn(c, spcl_cat,		"cat");
     spcl_add_fn(c, spcl_print,		"print");
+    //TODO: this is a really dumb way of adding namespaces
     //math stuff
     spcl_val tmp = spcl_make_inst(c, "math");
     spcl_inst* math_c = tmp.val.c;
@@ -1616,6 +1619,8 @@ static inline void setup_builtins(struct spcl_inst* c) {
     spcl_add_fn(math_c, spcl_ceil,	"ceil");
     spcl_add_fn(math_c, spcl_fabs,	"abs");
     spcl_set_val(c, "math", tmp, 0);
+    tmp = spcl_make_inst(c, "sys");
+    spcl_set_val(c, "sys", tmp, 0);
 }
 
 struct spcl_inst* make_spcl_inst(spcl_inst* parent) {
@@ -2062,7 +2067,7 @@ static inline spcl_val parse_literal_str(spcl_inst* c, read_state rs, lbi open_i
     spcl_val v;
     v.type = VAL_STR;
     //set up a buffer with enough memory
-    v.val.s = xmalloc( fs_diff(rs.b, close_ind, open_ind) );
+    v.val.s = xmalloc( fs_diff(rs.b, close_ind, open_ind)+1 );
     v.n_els = 0;
     for (lbi it = fs_add(rs.b, open_ind, 1); lbicmp(it, close_ind) < 0; it = fs_add(rs.b, it, 1)) {
 	char c = fs_get(rs.b, it);
@@ -2082,6 +2087,8 @@ static inline spcl_val parse_literal_str(spcl_inst* c, read_state rs, lbi open_i
 	    v.val.s[v.n_els++] = c;
 	}
     }
+    //null terminate so that it plays nicely with c
+    v.val.s[v.n_els] = 0;
     return v;
 }
 //helper for spcl_parse_line to hand list literals
@@ -2182,7 +2189,7 @@ static inline lbi* csv_to_inds(const spcl_fstream* fs, lbi open_ind, lbi close_i
     *n_inds = i-1;
     return inds;
 }
-static inline spcl_val spcl_make_fn_rs(read_state rs, lbi* arg_inds, size_t n_args, lbi* new_end);
+static inline spcl_val spcl_make_fn_rs(struct spcl_inst* c, read_state rs, lbi* arg_inds, size_t n_args, lbi* new_end);
 //parse function definition/call statements
 static inline spcl_val parse_literal_fn(struct spcl_inst* c, spcl_key key, read_state rs, lbi open_ind, lbi close_ind, lbi* new_end) {
     //check if this is a parenthetical expression
@@ -2213,7 +2220,7 @@ static inline spcl_val parse_literal_fn(struct spcl_inst* c, spcl_key key, read_
     //check if this is a declaration
     if (key == KEY_FN) {
 	//parse the function and check for errors
-	sto = spcl_make_fn_rs(rs, arg_inds, f.n_args, new_end);
+	sto = spcl_make_fn_rs(c, rs, arg_inds, f.n_args, new_end);
 	xfree(arg_inds);
 	return sto;
     } else {
@@ -2588,19 +2595,19 @@ spcl_val spcl_inst_from_file(const char* fname, int argc, const char** argv) {
     spcl_val ret = {0};
     //create a new spcl_inst
     spcl_inst* c = make_spcl_inst(NULL);
+    //create a buffer that we'll populate with [argv[0], argv[1], ...]
+    int tmp_n = SPCL_STR_BSIZE;
+    char* argv_str = xmalloc(tmp_n);
+    stpncpy(argv_str, "sys.argv=[", SPCL_STR_BSIZE);
+    int j = (int)strlen("sys.argv=[");
     if (argc > 0 && argv) {
-	//create a buffer that we'll populate with [argv[0], argv[1], ...]
-	int tmp_n = SPCL_STR_BSIZE;
-	char* tmp_str = xmalloc(tmp_n);
-	stpncpy(tmp_str, "argv=[", SPCL_STR_BSIZE);
-	int j = (int)strlen("argv=[");
 	for (int i = 0; i < argc; ++i) {
 	    //store whether argv[i] is a flag like -r
 	    int is_flag = 0;
 	    //find the first non-dash character
 	    int k = 0;
 	    if (argv[i][0] == '-' && argv[i][1] != '-') {
-		tmp_str[j++] = '\"';
+		argv_str[j++] = '\"';
 		k = 1;
 		is_flag = 1;
 	    } else if (argv[i][0] == '-' && argv[i][1] == '-') {
@@ -2609,27 +2616,29 @@ spcl_val spcl_inst_from_file(const char* fname, int argc, const char** argv) {
 	    for (;; ++k) {
 		if (j+2 >= tmp_n) {
 		    tmp_n *= 2;
-		    tmp_str = xrealloc(tmp_str, tmp_n);
+		    argv_str = xrealloc(argv_str, tmp_n);
 		}
 		//when we reach the end of an argument either add a comma or end brace
 		if (argv[i][k] == 0) {
 		    //we have to put the close quote around flags
 		    if (is_flag)
-			tmp_str[j++] = '\"';
-		    tmp_str[j++] = (i+1 < argc) ? ',' : END_SQR;
+			argv_str[j++] = '\"';
+		    //add a comma between elements but not after the last one
+		    if (i+1 < argc)
+			argv_str[j++] = ',';
 		    break;
 		}
-		tmp_str[j++] = argv[i][k];
+		argv_str[j++] = argv[i][k];
 	    }
 	}
-	//now read that buffer and free memory
-	ret = spcl_parse_line(c, tmp_str);
-	xfree(tmp_str);
-	
-	if (ret.type == VAL_ERR) {
-	    destroy_spcl_inst(c);
-	    return ret;
-	}
+    }
+    argv_str[j++] = ']';
+    //now read the argv buffer and free memory
+    ret = spcl_parse_line(c, argv_str);
+    xfree(argv_str);
+    if (ret.type == VAL_ERR) {
+	destroy_spcl_inst(c);
+	return ret;
     }
     //read the rest of the file and check to ensure the file was opened successfully
     spcl_fstream* fs = make_spcl_fstream(fname);
@@ -2657,7 +2666,7 @@ spcl_val spcl_inst_from_file(const char* fname, int argc, const char** argv) {
  * new_end: we must track the final location so that the caller fast-forwards to the end of the declaration
  * returns: a spcl_val with the function set
  */
-static inline spcl_val spcl_make_fn_rs(read_state rs, lbi* arg_inds, size_t n_args, lbi* new_end) {
+static inline spcl_val spcl_make_fn_rs(struct spcl_inst* c, read_state rs, lbi* arg_inds, size_t n_args, lbi* new_end) {
     //ensure that we can store the end location
     if (!new_end)
 	return spcl_make_err(E_BAD_SYNTAX, "declared function without room to grow");
@@ -2690,9 +2699,8 @@ static inline spcl_val spcl_make_fn_rs(read_state rs, lbi* arg_inds, size_t n_ar
     }
     sto.val.f->code_lines = fs_get_enclosed(rs.b, fs_add(rs.b, open_ind, 1), close_ind);
     sto.val.f->exec = NULL;
-    //we change the parent in spcl_uf_eval, so we just set NULL to be a dummy
-    //sto.val.f->fn_scope = make_spcl_inst(0x01);
-    sto.val.f->fn_scope = make_spcl_inst(NULL);
+    //we change the parent in spcl_uf_eval. However, calling with NULL indicates no parent, so we must pass a dummy
+    sto.val.f->fn_scope = make_spcl_inst(c);
     return sto;
 }
 spcl_uf* make_spcl_uf_ex(spcl_val (*p_exec)(spcl_inst*, spcl_fn_call)) {
