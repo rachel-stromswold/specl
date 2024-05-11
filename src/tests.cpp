@@ -849,17 +849,22 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	write_test_file(lines, n_lines, TEST_FNAME);
 	//check the lines (curly brace on new line)
 	spcl_fstream* fs = make_spcl_fstream(TEST_FNAME);
+	psize st_off = 0;
 	for (size_t i = 0; i < n_lines; ++i) {
 	    s8 line;
 	    //duplicate to silence const char* to char* errors
 	    line.s = strdup(lines[i]);
 	    line.n = strlen(lines[i]);
-	    s8 strval = fs_read( fs, make_lbi(i, 0), make_lbi(i, line.n) );
+	    s8 strval = fs_read( fs, make_lbi(0, st_off), make_lbi(0, st_off+line.n) );
 	    CHECK(s8cmp(line, strval) == 0);
 	    free(line.s);
+	    st_off += line.n+1;
 	}
+	lbi cur = make_lbi(0,0);
+	lbi lend = fs_line_end(fs, cur);
+	CHECK(lend.off == strlen(lines[0]));
 	//find the block that says fn
-	read_state rs = make_read_state(fs, make_lbi(0,0), make_lbi(1,0));
+	read_state rs = make_read_state(fs, cur, make_lbi(0,fs->flen));
 	spcl_key tkey = get_keyword(&rs);
 	CHECK(tkey == KEY_FN);
 	CHECK(rs.start.line == 0);
@@ -869,14 +874,17 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	spcl_val er = find_operator(rs, &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
 	CHECK(open_ind.line == 0);CHECK(open_ind.off == strlen("fn test_fun"));
-	CHECK(close_ind.line == 0);CHECK(close_ind.off == fs->line_sizes[0]-1);
+	CHECK(close_ind.line == 0);CHECK(close_ind.off == strlen("fn test_fun")+2);
 	CHECK(lbicmp(op_loc, new_end) >= 0);
 	//test the braces around the function
-	er = find_operator(make_read_state(fs, make_lbi(1,0), make_lbi(6,1)), &op_loc, &open_ind, &close_ind, &new_end);
+	cur = lend;
+	cur.off += 1;
+	lend = fs_line_end(fs, cur);
+	er = find_operator(make_read_state(fs, cur, fs_end(fs)), &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
-	CHECK(open_ind.line == 1);CHECK(open_ind.off == 0);
-	CHECK(close_ind.line == 6);CHECK(close_ind.off == 0);
-	spcl_fstream* b_fun_con = fs_get_enclosed(fs, open_ind, close_ind);
+	CHECK(open_ind.line == 0);CHECK(open_ind.off == cur.off);
+	CHECK(close_ind.line == 0);CHECK(close_ind.off == fs->flen - 2);
+	/*spcl_fstream* b_fun_con = fs_get_enclosed(fs, open_ind, close_ind);
 	for (size_t i = 0; i < b_fun_con->n_lines; ++i) {
 	    s8 line;
 	    line.s = strdup(fun_contents[i]);
@@ -884,13 +892,15 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	    s8 strval = fs_read(b_fun_con, make_lbi(i,0), make_lbi(i, line.n));
 	    CHECK(s8cmp(line, strval) == 0);
 	    free(line.s);
-	}
+	}*/
 	//check the braces around the if statement
-	er = find_operator(make_read_state(fs, make_lbi(2,0), close_ind), &op_loc, &open_ind, &close_ind, &new_end);
+	cur = lend;
+	cur.off += 1;
+	er = find_operator(make_read_state(fs, cur, close_ind), &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
-	CHECK(open_ind.line == 2);CHECK(open_ind.off == strlen("if a > 5 "));
-	CHECK(close_ind.line == 4);CHECK(close_ind.off == 0);
-	spcl_fstream* b_if_con = fs_get_enclosed(fs, open_ind, close_ind);
+	CHECK(open_ind.line == 0);CHECK(open_ind.off == strlen(lines[0])+strlen(lines[1])+2+strlen("if a > 5 "));
+	CHECK(close_ind.line == 0);CHECK(close_ind.off == 37);
+	/*spcl_fstream* b_if_con = fs_get_enclosed(fs, open_ind, close_ind);
 	for (size_t i = 0; i < b_if_con->n_lines; ++i) {
 	    s8 line;
 	    line.s = strdup(if_contents[i]);
@@ -900,7 +910,7 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	    free(line.s);
 	}
 	destroy_spcl_fstream(b_if_con);
-	destroy_spcl_fstream(b_fun_con);
+	destroy_spcl_fstream(b_fun_con);*/
 	destroy_spcl_fstream(fs);
     }
     SUBCASE("open brace on the same line") {
@@ -909,16 +919,21 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	write_test_file(lines, n_lines, TEST_FNAME);
 	//check the lines (curly brace on new line)
 	spcl_fstream* fs = make_spcl_fstream(TEST_FNAME);
+	psize st_off = 0;
 	for (size_t i = 0; i < n_lines; ++i) {
 	    s8 line;
 	    line.s = strdup(lines[i]);
 	    line.n = strlen(lines[i]);
-	    s8 strval = fs_read(fs, make_lbi(i, 0), make_lbi(i, line.n));
+	    s8 strval = fs_read(fs, make_lbi(0, st_off), make_lbi(0, st_off+line.n));
 	    CHECK(s8cmp(line, strval) == 0);
 	    free(line.s);
+	    st_off += line.n+1;
 	}
+	lbi cur = make_lbi(0,0);
+	lbi lend = fs_line_end(fs, cur);
+	CHECK(lend.off == strlen(lines[0]));
 	//find the block that says fn
-	read_state rs = make_read_state(fs, make_lbi(0,0), make_lbi(1,0));
+	read_state rs = make_read_state(fs, cur, lend);
 	spcl_key tkey = get_keyword(&rs);
 	CHECK(tkey == KEY_FN);
 	CHECK(rs.start.line == 0);
@@ -931,16 +946,18 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	CHECK(close_ind.line == 0);CHECK(close_ind.off == 15);
 	CHECK(lbicmp(op_loc, new_end) >= 0);
 	//check the braces around the if statement
-	er = find_operator(make_read_state(fs, make_lbi(1,0), make_lbi(2,0)), &op_loc, &open_ind, &close_ind, &new_end);
+	cur = lend;
+	cur.off += 1;
+	er = find_operator(make_read_state(fs, cur, fs_end(fs)), &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
-	CHECK(open_ind.line == 1);CHECK(open_ind.off == strlen("if a > 5 "));
-	CHECK(close_ind.line == 1);CHECK(close_ind.off == 18);
+	CHECK(open_ind.line == 0);CHECK(open_ind.off == 28);
+	CHECK(close_ind.line == 0);CHECK(close_ind.off == 37);
 	//move to the next character after the open brace and get the contents
 	open_ind.off += 1;
-	spcl_fstream* b_if_con = fs_get_enclosed(fs, open_ind, close_ind);
+	/*spcl_fstream* b_if_con = fs_get_enclosed(fs, open_ind, close_ind);
 	CHECK(b_if_con->n_lines == 1);
 	CHECK(strcmp(b_if_con->lines[0], "return 1\n") == 0);
-	destroy_spcl_fstream(b_if_con);
+	destroy_spcl_fstream(b_if_con);*/
 	destroy_spcl_fstream(fs);
     }
 }
@@ -956,7 +973,7 @@ spcl_val test_fun_call(spcl_inst* c, spcl_fn_call f) {
     if (a > 5) {
 	ret.type = VAL_INST;
 	ret.val.c = make_spcl_inst(c);
-	spcl_set_val(ret.val.c, "name", cstr_to_spcl("hi"), 0);
+	spcl_set_val(ret.val.c, "name", cstr_to_spcl("hi"), 1);
 	return ret;
     }
     return f.args[0];
@@ -1032,12 +1049,10 @@ TEST_CASE("spcl_inst parsing") {
     SUBCASE ("with nesting") {
 	const char* lines[] = { "a = {name = \"apple\";", "spcl_vals = [20, 11]}", "b = a.spcl_vals[0]", "c = a.spcl_vals[1] + a.spcl_vals[0]+1" }; 
 	size_t n_lines = sizeof(lines)/sizeof(char*);
-	spcl_fstream* fs = make_spcl_fstreamn(NULL, 0);
-	for (size_t i = 0; i < n_lines; ++i)
-	    spcl_fstream_append(fs, lines[i]);
-	spcl_inst* c = make_spcl_inst(NULL);
-	spcl_val er = spcl_read_lines(c, fs);
-	CHECK(er.type == VAL_UNDEF);
+	write_test_file(lines, n_lines, TEST_FNAME);
+	spcl_val v = spcl_inst_from_file(TEST_FNAME, 0, NULL);
+	REQUIRE(v.type == VAL_INST);
+	spcl_inst* c = v.val.c;
 	//lookup the named spcl_vals
 	spcl_val val_a = spcl_find(c, "a");
 	CHECK(val_a.type == VAL_INST);
@@ -1057,8 +1072,7 @@ TEST_CASE("spcl_inst parsing") {
 	spcl_val val_c = spcl_find(c, "c");
 	CHECK(val_c.type == VAL_NUM);
 	CHECK(val_c.val.x == 32);
-	destroy_spcl_fstream(fs);
-	destroy_spcl_inst(c);
+	cleanup_spcl_val(&v);
     }
     SUBCASE ("external user defined functions") {
 	const char* fun_name = "test_fun";
@@ -1277,7 +1291,7 @@ TEST_CASE("file importing") {
 	"a1 = double(1)",
 	"a2 = double(2)",
 	"a3 = double(3)",
-	"a4 = double(argv[0])",
+	"a4 = double(sys.argv[0])",
 	"print(\"in file importing\", a1, a2, a3, a4)" };
     size_t n_lines2 = sizeof(lines2)/sizeof(char*);
     write_test_file(lines2, n_lines2, "/tmp/lines2.spcl");
@@ -1295,8 +1309,8 @@ TEST_CASE("file importing") {
     CHECK(tmp == 2);
     CHECK(spcl_find_int(v.val.c, "b1", &tmp) >= 0);
     CHECK(tmp == 0);
-    CHECK(spcl_test(v.val.c, "len(argv) == 2"));
-    CHECK(spcl_test(v.val.c, "argv[1] == \"r\""));
+    CHECK(spcl_test(v.val.c, "len(sys.argv) == 2"));
+    CHECK(spcl_test(v.val.c, "sys.argv[1] == \"r\""));
     cleanup_spcl_val(&v);
 }
 

@@ -104,9 +104,11 @@ lbi make_lbi(size_t pl, size_t po);
 int lbicmp(lbi lhs, lbi rhs);
 
 typedef struct spcl_fstream {
-    char** lines;
-    size_t* line_sizes;//length of each line buffer including null terminator
-    size_t n_lines;
+    FILE* f;		//the file pointer to read from
+    psize flen;		//the length of the file
+    psize cst;		//the starting location of the cache in f. This is computed using ftell(f).
+    psize clen;		//the length of the cache in bytes
+    char* cache;	//a cache of the fstream near a given location
 } spcl_fstream;
 /**
  * Return a new spcl_fstream
@@ -115,14 +117,18 @@ typedef struct spcl_fstream {
  */
 spcl_fstream* make_spcl_fstreamn(const char* p_fname, size_t n);
 /**
- * Return a copy to the fstream pointed to by o
- */
-spcl_fstream* copy_spcl_fstream(const spcl_fstream* o);
-/**
  * Free memory associated with the spcl_fstream fs.
  * fs: the fstream to destroy. This should be created with a call to make_spcl_fstream or copy_spcl_fstream as a call to free(fs) is made.
  */
 void destroy_spcl_fstream(spcl_fstream* fs);
+/**
+ * Find the index of the end of the file.
+ */
+lbi fs_end(const spcl_fstream* fs);
+/**
+ * Find the first line end after the index s.
+ */
+lbi fs_line_end(const spcl_fstream* fs, lbi s);
 /**
  * Append the line str to the end of the fstream fs
  * fs: the fstream to modify

@@ -13,21 +13,25 @@ static const char* const valnames[N_VALTYPES] = {"none", "error", "numeric", "st
 #define spcl_istrue(v) (!spcl_isfalse(v))
 
 //dumb forward declarations
-static inline lbi fs_end(const spcl_fstream* fs) {
-    return make_lbi(fs->n_lines, 0);
-}
-//get the index of the last character in the filestream fs that has the line s
-static inline lbi fs_line_end(const spcl_fstream* fs, lbi s) {
-    if (!fs || s.line >= fs->n_lines)
-	return make_lbi(0,0);
-    return make_lbi(s.line, fs->line_sizes[s.line]);
+lbi fs_end(const spcl_fstream* fs) {
+    if (!fs->f)
+	return make_lbi(0, fs->clen);
+    return make_lbi(0, fs->flen);
+    /*long fs_cur = ftell(fs->f);
+    fseek(fs->f, 0, SEEK_END);
+    lbi ret = make_lbi(0, ftell(fs->f));
+    fseek(fs->f, fs_cur, SEEK_SET);
+    return ret;*/
 }
 /**
  * move the line buffer forward by one character
  * p: the index to start at
  */
 static inline lbi fs_add(const spcl_fstream* fs, lbi p, size_t rhs) {
-    if (p.line >= fs->n_lines)
+    if (p.off+rhs <= fs->clen)
+	p.off += rhs;
+    return p;
+    /*if (p.line >= fs->n_lines)
 	return p;
     lbi ret = make_lbi(p.line, p.off+rhs);
     if (ret.off <= fs->line_sizes[ret.line])
@@ -38,14 +42,19 @@ static inline lbi fs_add(const spcl_fstream* fs, lbi p, size_t rhs) {
 	    return make_lbi(fs->n_lines, 0);
 	ret.off = rem;
     } while(ret.off >= fs->line_sizes[ret.line]);
-    return ret;
+    return ret;*/
 }
 /**
  * move the line buffer back by one character
  * p: the index to start at
  */
 static inline lbi fs_sub(const spcl_fstream* fs, lbi p, size_t rhs) {
-    if (p.line >= fs->n_lines)
+    if (p.off > rhs)
+	p.off -= rhs;
+    else
+	p.off = 0;
+    return p;
+    /*if (p.line >= fs->n_lines)
 	p.line = fs->n_lines-1;
     //if we stay on the current line we don't need to worry about overflows
     if (p.off >= rhs)
@@ -59,21 +68,23 @@ static inline lbi fs_sub(const spcl_fstream* fs, lbi p, size_t rhs) {
     }
     if (ret.off >= rhs)
 	ret.off -= rhs;
-    return ret;
+    return ret;*/
 }
 /**
  * returns the character at position pos
  */
 static inline char fs_get(const spcl_fstream* fs, lbi pos) {
-    if (pos.line >= fs->n_lines || pos.off >= fs->line_sizes[pos.line])
+    //TODO: this won't work correctly once we switch to actually streaming files
+    if (pos.off >= fs->clen)
         return 0;
-    return fs->lines[pos.line][pos.off];
+    return fs->cache[pos.off];
 }
 /**
  * return how many characters into the line buffer l is
  */
 static inline size_t fs_diff(const spcl_fstream* fs, lbi r, lbi l) {
-    size_t ret = 0;
+    return r.off - l.off;
+    /*size_t ret = 0;
     while (1) {
 	ret += r.off;
 	if (l.line == r.line)
@@ -81,7 +92,7 @@ static inline size_t fs_diff(const spcl_fstream* fs, lbi r, lbi l) {
 	r.off = fs->line_sizes[--r.line];
     }
     ret -= l.off;
-    return ret;
+    return ret;*/
 }
 
 /** ======================================================== utility functions ======================================================== **/
@@ -146,7 +157,7 @@ static inline lbi strchr_block_rs(const spcl_fstream* fs, lbi s, lbi e, char c) 
     stack(char,BLK_MAX) blk_stk = make_stack(char,BLK_MAX)();
     char prev;
     char cur = 0;
-    while (lbicmp(s, e)) {
+    while (s.off < e.off && s.off < fs->flen) {
 	prev = cur;
 	cur = fs_get(fs, s);
 	if (!cur)
@@ -172,7 +183,7 @@ static inline lbi strchr_block_rs(const spcl_fstream* fs, lbi s, lbi e, char c) 
 		if ( push(char,BLK_MAX)(&blk_stk, cur) ) return e;
 	    }
 	}
-	s = fs_add(fs, s, 1);
+	s.off += 1;
     }
     return e;
 }
@@ -186,7 +197,7 @@ static inline lbi token_block(const spcl_fstream* fs, lbi s, lbi e, const char* 
     stack(char,BLK_MAX) blk_stk = make_stack(char,BLK_MAX)();
     char prev;
     char cur = 0;
-    while (lbicmp(s, e)) {
+    while (lbicmp(s, e) && s.off < fs->flen) {
 	prev = cur;
 	cur = fs_get(fs, s);
 	if (!cur)
@@ -231,7 +242,7 @@ static inline lbi token_block(const spcl_fstream* fs, lbi s, lbi e, const char* 
 		if ( push(char,BLK_MAX)(&blk_stk, cur) ) return e;
 	    }
 	}
-	s = fs_add(fs, s, 1);
+	s.off += 1;
     }
     return e;
 }
@@ -267,16 +278,53 @@ spcl_local read_state make_read_state(const spcl_fstream* fs, lbi s, lbi e) {
 
 /** ============================ spcl_fstream ============================ **/
 
-static inline spcl_fstream* alloc_fstream() {
+/**
+ * Grow the cache used for the fstream fs by attempting to double its size
+ * returns: 0 on failure or 1 on success
+ */
+static inline int grow_fstream(spcl_fstream* fs) {
+    //detect overflows
+    if (fs->clen > PSIZE_MAX >> 2)
+	return 0;
+    //reallocate and check for success
+    char* tmp_cache = realloc(fs->cache, 2*fs->clen);
+    if (!tmp_cache)
+	return 0;
+    //if successful then adjust the size and the cache
+    fs->clen *= 2;
+    fs->cache = tmp_cache;
+    return 1;
+}
+static inline spcl_fstream* alloc_fstream(psize hint) {
     spcl_fstream* fs = xmalloc(sizeof(spcl_fstream));
-    fs->lines = NULL;
-    fs->line_sizes = NULL;
-    fs->n_lines = 0;
+    memset(fs, 0, sizeof(spcl_fstream));
+    //set the cache to have hint bytes if applicable
+    if (hint > 0) {
+	char* tmp = calloc(hint, sizeof(char));
+	if (!tmp)
+	    return fs;
+	fs->cache = tmp;
+	fs->clen = hint;
+    }
+    return fs;
+}
+spcl_fstream* make_spcl_fstream_str(const char* str, size_t n) {
+    spcl_fstream* fs = alloc_fstream(n);
+    fs->cache = malloc(n);
+    if (!fs->cache) {
+	free(fs);
+	return NULL;
+    }
+    fs->f = NULL;
+    fs->cst = 0;
+    fs->flen = n;
+    fs->clen = n;
+    memcpy(fs->cache, str, n);
     return fs;
 }
 spcl_fstream* make_spcl_fstreamn(const char* p_fname, size_t n) {
     if (!p_fname)
-	return alloc_fstream();
+	return alloc_fstream(0);
 
     //this is so fucking dumb, i hate null-terminated strings
     char* tmp_fname = strndup(p_fname, n);
@@ -284,110 +332,71 @@ spcl_fstream* make_spcl_fstreamn(const char* p_fname, size_t n) {
     free(tmp_fname);
     if (fp) {
 	//allocate memory for the stream and initialize to be empty
-	spcl_fstream* fs = alloc_fstream();
-	size_t buf_size = LINE_SIZE;
-	fs->lines = xmalloc(sizeof(char*)*buf_size);
-	fs->line_sizes = xmalloc(sizeof(size_t)*buf_size);
-	fs->n_lines = 0;
-	//start reading
-        size_t line_len = 0;
-        int go_again = 1;
-        do {
-	    //reallocate buffer if necessary
-            if (fs->n_lines >= buf_size) {
-                buf_size *= 2;
-                fs->lines = xrealloc(fs->lines, sizeof(char*)*buf_size);
-                fs->line_sizes = xrealloc(fs->line_sizes, sizeof(size_t)*buf_size);
-            }
-	    //read the line until a semicolon, newline or EOF is found
-            size_t this_size = LINE_SIZE;
-            char* this_buf = xmalloc(this_size);
-            int res = fgetc(fp);
-            for (line_len = 0; 1; ++line_len) {
-                if (line_len >= this_size) {
-                    this_size *= 2;
-                    this_buf = xrealloc(this_buf, sizeof(char)*this_size);
-                }
-                this_buf[line_len] = (char)res;
-                if ((char)res == '\n') {
-                    //this_buf[line_len] = 0;
-                    break;
-                } else if (res == EOF) {
-		    this_buf[line_len] = 0;
-		    go_again = 0;
-		    break;
+	spcl_fstream* fs = alloc_fstream(SPCL_STR_BSIZE);
+	fs->f = fp;
+	//figure out the length of the file
+	fseek(fp, 0, SEEK_END);
+	fs->flen = ftell(fs->f);
+	fseek(fp, 0, SEEK_SET);
+	//TODO: reading the entire file into memory is dumb, we should stream from it instead
+	psize j = 0;
+	int res = fgetc(fp);
+	while (res != EOF) {
+	    //if we reached the end of the buffer, try growing and return NULL if that fails
+	    if (j == fs->clen) {
+		if (!grow_fstream(fs)) {
+		    destroy_spcl_fstream(fs);
+		    return NULL;
 		}
-                res = fgetc(fp);
-            }
-            if (line_len > 0) {
-                this_buf = xrealloc(this_buf, sizeof(char) * (line_len + 1));
-                fs->lines[fs->n_lines] = this_buf;
-                fs->line_sizes[fs->n_lines++] = line_len;
-            } else {
-                xfree(this_buf);
-            }
-        } while (go_again);
-        fs->lines = xrealloc(fs->lines, sizeof(char*) * fs->n_lines);
-        fs->line_sizes = xrealloc(fs->line_sizes, sizeof(size_t) * fs->n_lines);
-        fclose(fp);
+	    }
+	    //otherwise, append
+	    fs->cache[j++] = (char)res;
+	    res = fgetc(fp);
+	}
 	return fs;
     }
     return NULL;
 }
-spcl_fstream* copy_spcl_fstream(const spcl_fstream* o) {
-    spcl_fstream* fs = alloc_fstream();
-    fs->n_lines = o->n_lines;
-    fs->line_sizes = xmalloc(sizeof(size_t) * fs->n_lines);
-    fs->lines = xmalloc(sizeof(char*) * fs->n_lines);
-    for (size_t i = 0; i < fs->n_lines; ++i) {
-        fs->lines[i] = strdup(o->lines[i]);
-        fs->line_sizes[i] = o->line_sizes[i];
-    }
-    return fs;
+spcl_fstream* copy_spcl_fstream(spcl_fstream* fs) {
+    spcl_fstream* ret = alloc_fstream(fs->clen);
+    memcpy(ret->cache, fs->cache, fs->clen);
+    ret->flen = fs->flen;
+    ret->f = fs->f;
+    return ret;
 }
 void destroy_spcl_fstream(spcl_fstream* fs) {
-    if (fs->lines) {
-        for (size_t i = 0; i < fs->n_lines; ++i)
-            xfree(fs->lines[i]);
-        xfree(fs->lines);
-    }
-    if (fs->line_sizes)
-        xfree(fs->line_sizes);
-    xfree(fs);
+    if (!fs)
+	return;
+    if (fs->cache)
+	free(fs->cache);
+    if (fs->f)
+	fclose(fs->f);
+    free(fs);
 }
-void spcl_fstream_append(spcl_fstream* fs, const char* str) {
+//get the index of the last character in the filestream fs that has the line s
+lbi fs_line_end(const spcl_fstream* fs, lbi s) {
+    while (s.off < fs->flen && fs_get(fs, s) != '\n')
+	++s.off;
+    return s;
+}
+/*void spcl_fstream_append(spcl_fstream* fs, const char* str) {
     fs->lines = xrealloc( fs->lines, sizeof(char*)*(fs->n_lines+1) );
     fs->line_sizes = xrealloc( fs->line_sizes, sizeof(char*)*(fs->n_lines+1) );
     fs->lines[fs->n_lines] = strdup(str);
     fs->line_sizes[fs->n_lines++] = strlen(str)+1;
-}
+}*/
 //Below are protected functions in fstream. They are not intended to be used by external libraries.
-
-spcl_local char* fs_get_line(const spcl_fstream* fs, lbi b, lbi e, size_t* n) {
-    /*while (is_whitespace(fs_get(fs, b)))
-	b = fs_add(fs, b, 1);*/
-    if (b.line >= fs->n_lines) {
-        return NULL;
-    }
-    //figure out how much space we should allocate
-    size_t tot_size = fs->line_sizes[b.line] - b.off + 1;
-    for (size_t i = b.line+1; i < fs->n_lines && i <= e.line; ++i)
-	tot_size += fs->line_sizes[b.line];
-    tot_size = tot_size;
-    //allocate it and copy
-    char* ret = xmalloc(sizeof(char)*tot_size);
-    size_t wi = 0;
-    while (lbicmp(b,e) < 0 && wi < tot_size) {
-	ret[wi++] = fs_get(fs, b);
-	b = fs_add(fs, b, 1);
-    }
-    ret[wi] = 0;
-    if (n) *n = wi;
-    return ret;
-}
+//TODO: I want to get rid of this function and replace it with calls to spcl_read_lines_block
 spcl_local spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, lbi start, lbi end) {
+    if (end.off <= start.off) 
+	return alloc_fstream(0);
+    spcl_fstream* ret = alloc_fstream(end.off - start.off);
+    for (psize i = start.off; i < end.off; ++i)
+	ret->cache[i-start.off] = fs->cache[i];
+    ret->flen = end.off-start.off;
+    return ret;
     //TODO: there seems to be a bug where multiple lines get folded in one. figure out why this happens.
-    spcl_fstream* ret = alloc_fstream();
+    /*spcl_fstream* ret = alloc_fstream();
     if (!fs || fs->n_lines == 0 || lbicmp(start, end) >= 0) {
 	ret->n_lines = 0;
 	ret->lines = NULL;
@@ -418,12 +427,14 @@ spcl_local spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, lbi start, lbi 
 	ret->line_sizes[i] = (i+1 == ret->n_lines) ? end.off : fs->line_sizes[i+start.line];
 	ret->lines[i] = strndup(fs->lines[i+start.line], ret->line_sizes[i]);
     }
-    return ret;
+    return ret;*/
 }
 spcl_local s8 fs_read(const spcl_fstream* fs, lbi s, lbi e) {
-    if (s.line >= fs->n_lines || s.off >= fs->line_sizes[s.line])
+    if (s.off >= fs->clen)
 	return (s8){NULL, 0};
-    return (s8){fs->lines[s.line]+s.off, fs_diff(fs, e, s)};
+    if (e.off >= fs->clen)
+	e.off = fs->clen;
+    return (s8){fs->cache+s.off, e.off-s.off};
 }
 
 /**
@@ -434,9 +445,9 @@ spcl_local s8 fs_read(const spcl_fstream* fs, lbi s, lbi e) {
  */
 static inline void skip_ws(read_state* rs, int force) {
     if (force)
-	rs->start = fs_add(rs->b, rs->start, 1);
-    while (is_whitespace(fs_get(rs->b, rs->start)) && lbicmp(rs->start, rs->end) < 0)
-	rs->start = fs_add(rs->b, rs->start, 1);
+	rs->start.off += 1;
+    while (is_whitespace(fs_get(rs->b, rs->start)) && rs->start.off < rs->end.off)
+	rs->start.off += 1;
 }
 
 /** ======================================================== spcl_fn_call ======================================================== **/
@@ -2345,7 +2356,6 @@ static inline spcl_val spcl_parse_line_rs(struct spcl_inst* c, read_state rs, lb
 	} else {
 	    //if there are enclosed blocks then we need to read those
 	    switch (fs_get(rs.b, open_ind)) {
-	    //case '\"': sto.type = VAL_STR; sto.val.s = fs_get_line(rs.b, fs_add(rs.b, open_ind, 1), close_ind, &sto.n_els);sto.n_els += 1;break; //"
 	    case '\"': sto = parse_literal_str(c, rs, open_ind, close_ind);break;
 	    case BEG_SQR:  sto = (is_var)? copy_spcl_val(spcl_find_rs(c, rs)) : parse_literal_list(c, rs, open_ind, close_ind);break; //]
 	    case BEG_CRL:  sto = parse_literal_table(c, rs, open_ind, close_ind);break; //}
@@ -2360,24 +2370,30 @@ static inline spcl_val spcl_parse_line_rs(struct spcl_inst* c, read_state rs, lb
 }
 spcl_val spcl_parse_line(spcl_inst* c, const char* str) {
     //Setup a dummy line buffer. We're calling alloca with sizes known at compile-time, don't get mad at me.
-    str_to_fs(str);
-    return spcl_parse_line_rs(c, make_read_state(&fs, make_lbi(0,0), fs_end(&fs)), NULL, KEY_NONE);
+    spcl_fstream* fs = make_spcl_fstream_str(str, strlen(str));
+    if (!fs)
+	return spcl_make_err(E_NOMEM, NULL);
+    spcl_val v = spcl_parse_line_rs(c, make_read_state(fs, make_lbi(0,0), fs_end(fs)), NULL, KEY_NONE);
+    destroy_spcl_fstream(fs);
+    return v;
 }
 int spcl_test(spcl_inst* c, const char* str) {
-    str_to_fs(str);
-    spcl_val v = spcl_parse_line_rs(c, make_read_state(&fs, make_lbi(0,0), fs_end(&fs)), NULL, KEY_NONE);
+    spcl_fstream* fs = make_spcl_fstream_str(str, strlen(str));
+    spcl_val v = spcl_parse_line_rs(c, make_read_state(fs, make_lbi(0,0), fs_end(fs)), NULL, KEY_NONE);
     //check whether the statement v is true
     int ret = 1;
     if (v.type == VAL_ERR || v.type == VAL_UNDEF || (v.type == VAL_NUM && v.val.x == 0))
 	ret = 0;
     //cleanup the temporary memory allocated
     cleanup_spcl_val(&v);
+    destroy_spcl_fstream(fs);
     return ret;
 }
 spcl_val spcl_find(const struct spcl_inst* c, const char* str) {
-    //Setup a dummy line buffer. We're calling alloca with sizes known at compile-time, don't get mad at me.
-    str_to_fs(str);
-    return spcl_find_rs( c, make_read_state(&fs, make_lbi(0,0), fs_end(&fs)) );
+    spcl_fstream* fs = make_spcl_fstream_str(str, strlen(str));
+    spcl_val v = spcl_find_rs( c, make_read_state(fs, make_lbi(0,0), fs_end(fs)) );
+    destroy_spcl_fstream(fs);
+    return v;
 }
 int spcl_find_object(const spcl_inst* c, const char* str, const char* typename, spcl_inst** sto) {
     spcl_val vobj = spcl_find(c, str);
@@ -2530,16 +2546,15 @@ static inline spcl_val get_block(spcl_key k, read_state* rs) {
     }
     return spcl_make_err(E_BAD_SYNTAX, "something that should be impossible happened! congratulations!");
 }
-spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b) {
+static inline spcl_val spcl_read_lines_block(struct spcl_inst* c, read_state block_rs) {
     spcl_val ret;
-
     lbi end;
-    read_state rs = make_read_state(b, make_lbi(0,0), make_lbi(0,0));
+    read_state rs = make_read_state(block_rs.b, block_rs.start, block_rs.end);
 
     //iterate over each line in the file
-    while (lbicmp(rs.start, fs_end(rs.b)) < 0) {
+    while (rs.start.off < block_rs.end.off) {
 	//rs.end = make_lbi(rs.start.line, b->line_sizes[rs.start.line]);
-	rs.end = fs_end(b);
+	rs.end = fs_end(rs.b);
 
 	//look for keywords at the start of a line. If fast-forwarding takes us to a newline, then this string was empty unless there was a keyword.
 	spcl_key start_key = get_keyword(&rs);
@@ -2580,14 +2595,19 @@ spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b) {
 	if (end.off == SIZE_MAX || end.line == SIZE_MAX)
 	    return ret;
 	//if its a comment we should skip this line
-	if (fs_get(b, end) == '#') {
-	    rs.start.line += 1;
-	    rs.start.off = 0;
+	if (fs_get(rs.b, end) == '#') {
+	    rs.start = fs_line_end(rs.b, end);
+	    rs.start.off += 1;
 	} else {
-	    rs.start = fs_add(b, end, 1);
+	    rs.start = fs_add(rs.b, end, 1);
 	}
     }
     return spcl_make_none();
+}
+
+spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b) {
+    read_state rs = make_read_state(b, make_lbi(0,0), make_lbi(0, b->flen));
+    return spcl_read_lines_block(c, rs);
 }
 
 spcl_val spcl_inst_from_file(const char* fname, int argc, const char** argv) {
