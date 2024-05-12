@@ -839,7 +839,7 @@ void write_test_file(const char** lines, size_t n_lines, const char* fname) {
 
 //this function has a bunch of stuff that's only marked visible in debug builds, so we just ommit it for release
 #if SPCL_DEBUG_LVL>0
-TEST_CASE("spcl_fstream fs_get_enclosed") {
+TEST_CASE("spcl_fstream navigation") {
     const char* fun_contents[] = {"{", "if a > 5 {", "return 1", "}", "return 0", ""};
     const char* if_contents[] = {"{", "return 1", ""};
 
@@ -883,32 +883,12 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	CHECK(er.type != VAL_ERR);
 	CHECK(open_ind == cur);
 	CHECK(close_ind == fs->flen - 2);
-	/*spcl_fstream* b_fun_con = fs_get_enclosed(fs, open_ind, close_ind);
-	for (size_t i = 0; i < b_fun_con->n_lines; ++i) {
-	    s8 line;
-	    line.s = strdup(fun_contents[i]);
-	    line.n = strlen(fun_contents[i]);
-	    s8 strval = fs_read(b_fun_con, 0, line.n);
-	    CHECK(s8cmp(line, strval) == 0);
-	    free(line.s);
-	}*/
 	//check the braces around the if statement
 	cur = lend+1;
 	er = find_operator(make_read_state(fs, cur, close_ind), &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
 	CHECK(open_ind == strlen(lines[0])+strlen(lines[1])+2+strlen("if a > 5 "));
 	CHECK(close_ind == 37);
-	/*spcl_fstream* b_if_con = fs_get_enclosed(fs, open_ind, close_ind);
-	for (size_t i = 0; i < b_if_con->n_lines; ++i) {
-	    s8 line;
-	    line.s = strdup(if_contents[i]);
-	    line.n = strlen(if_contents[i]);
-	    s8 strval = fs_read(b_if_con, 0, line.n);
-	    CHECK(s8cmp(line, strval) == 0);
-	    free(line.s);
-	}
-	destroy_spcl_fstream(b_if_con);
-	destroy_spcl_fstream(b_fun_con);*/
 	destroy_spcl_fstream(fs);
     }
     SUBCASE("open brace on the same line") {
@@ -950,10 +930,6 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	CHECK(close_ind == 37);
 	//move to the next character after the open brace and get the contents
 	open_ind += 1;
-	/*spcl_fstream* b_if_con = fs_get_enclosed(fs, open_ind, close_ind);
-	CHECK(b_if_con->n_lines == 1);
-	CHECK(strcmp(b_if_con->lines[0], "return 1\n") == 0);
-	destroy_spcl_fstream(b_if_con);*/
 	destroy_spcl_fstream(fs);
     }
 }

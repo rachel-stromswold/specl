@@ -271,13 +271,6 @@ spcl_fstream* make_spcl_fstreamn(const char* p_fname, size_t n) {
     }
     return NULL;
 }
-spcl_fstream* copy_spcl_fstream(spcl_fstream* fs) {
-    spcl_fstream* ret = alloc_fstream(fs->clen);
-    memcpy(ret->cache, fs->cache, fs->clen);
-    ret->flen = fs->flen;
-    ret->f = fs->f;
-    return ret;
-}
 void destroy_spcl_fstream(spcl_fstream* fs) {
     if (!fs)
 	return;
@@ -305,16 +298,6 @@ psize fs_line_end(const spcl_fstream* fs, psize s) {
     return s;
 }
 //Below are protected functions in fstream. They are not intended to be used by external libraries.
-//TODO: I want to get rid of this function and replace it with calls to spcl_read_lines_block
-spcl_local spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, psize start, psize end) {
-    if (end <= start) 
-	return alloc_fstream(0);
-    spcl_fstream* ret = alloc_fstream(end - start);
-    for (psize i = start; i < end; ++i)
-	ret->cache[i-start] = fs->cache[i];
-    ret->flen = end-start;
-    return ret;
-}
 spcl_local s8 fs_read(const spcl_fstream* fs, psize s, psize e) {
     if (s >= fs->clen)
 	return (s8){NULL, 0};
@@ -1703,6 +1686,7 @@ spcl_local spcl_val find_operator(read_state rs, psize* op_loc, psize* open_ind,
 }
 //forward declare so that helpers can call
 static inline spcl_val spcl_parse_line_rs(spcl_inst* c, read_state rs, psize* new_end, spcl_key start_key);
+static inline spcl_val spcl_read_lines_block(struct spcl_inst* c, read_state block_rs);
 /**
  * A helper which accesses v[ind]. If assign is not NULL, then v[ind] = *assign.
  */
@@ -2170,14 +2154,12 @@ static inline spcl_val parse_literal_fn(struct spcl_inst* c, spcl_key key, read_
 static inline spcl_val parse_literal_table(struct spcl_inst* c, read_state rs, psize open_ind, psize close_ind) {
     //create a new context and start reading
     spcl_val ret = spcl_make_inst(c, NULL);
-    spcl_fstream* sub_fs = fs_get_enclosed(rs.b, open_ind+1, close_ind);
-    spcl_val er = spcl_read_lines(ret.val.c, sub_fs);
+    spcl_val er = spcl_read_lines_block( ret.val.c, make_read_state(rs.b, open_ind+1, close_ind) );
     //handle errors
     if (er.type == VAL_ERR) {
 	cleanup_spcl_val(&ret);
 	ret = er;
     }
-    destroy_spcl_fstream(sub_fs);
     return ret;
 }
 
@@ -2436,7 +2418,7 @@ static inline spcl_val spcl_read_lines_block(struct spcl_inst* c, read_state blo
 
     //iterate over each line in the file
     while (rs.start < block_rs.end) {
-	rs.end = fs_end(rs.b);
+	rs.end = block_rs.end;
 
 	//look for keywords at the start of a line. If fast-forwarding takes us to a newline, then this string was empty unless there was a keyword.
 	spcl_key start_key = get_keyword(&rs);
@@ -2594,7 +2576,7 @@ static inline spcl_val spcl_make_fn_rs(struct spcl_inst* c, read_state rs, psize
 	s8 argname = trim_whitespace(fs_read(rs.b, this_start, arg_inds[i+1]));
 	sto.val.f->call_sig.args[i] = spcl_make_str(argname.s, argname.n);
     }
-    sto.val.f->code_lines = fs_get_enclosed(rs.b, open_ind+1, close_ind);
+    sto.val.f->code_lines = make_read_state(rs.b, open_ind+1, close_ind);
     sto.val.f->exec = NULL;
     //we change the parent in spcl_uf_eval. However, calling with NULL indicates no parent, so we must pass a dummy
     sto.val.f->fn_scope = make_spcl_inst(c);
@@ -2602,7 +2584,7 @@ static inline spcl_val spcl_make_fn_rs(struct spcl_inst* c, read_state rs, psize
 }
 spcl_uf* make_spcl_uf_ex(spcl_val (*p_exec)(spcl_inst*, spcl_fn_call)) {
     spcl_uf* uf = xmalloc(sizeof(spcl_uf));
-    uf->code_lines = NULL;
+    uf->code_lines = make_read_state(NULL, 0, 0);
     uf->call_sig.name = (s8){0};
     uf->call_sig.n_args = 0;
     uf->exec = p_exec;
@@ -2611,20 +2593,13 @@ spcl_uf* make_spcl_uf_ex(spcl_val (*p_exec)(spcl_inst*, spcl_fn_call)) {
 }
 spcl_uf* copy_spcl_uf(const spcl_uf* o) {
     spcl_uf* uf = xmalloc(sizeof(spcl_uf));
-    uf->code_lines = (o->code_lines)? copy_spcl_fstream(o->code_lines): NULL;
-    //TODO: the name should be made valid after copying
+    memcpy(uf, o, sizeof(spcl_uf));
     uf->call_sig.name = (s8){0};
-    //uf->call_sig.name = (o->call_sig.name)? strdup(o->call_sig.name): NULL;
-    uf->call_sig.n_args = o->call_sig.n_args;
-    uf->exec = o->exec;
-    uf->fn_scope = NULL;
     return uf;
 }
 //deallocation
 void destroy_spcl_uf(spcl_uf* uf) {
     cleanup_spcl_fn_call(&(uf->call_sig));
-    if (uf->code_lines)
-	destroy_spcl_fstream(uf->code_lines);
     if (uf->fn_scope)
 	destroy_spcl_inst(uf->fn_scope);
     xfree(uf);
@@ -2632,7 +2607,7 @@ void destroy_spcl_uf(spcl_uf* uf) {
 spcl_val spcl_uf_eval(spcl_uf* uf, spcl_inst* c, spcl_fn_call call) {
     if (uf->exec) {
 	return (*uf->exec)(c, call);
-    } else if (uf->code_lines) {
+    } else if (uf->code_lines.b) {
 	//TODO: handle script functions
 	if (call.n_args != uf->call_sig.n_args)
 	    return spcl_make_err(E_LACK_TOKENS, "%.*s() expected %lu arguments, got %lu", call.name.n, call.name.s, uf->call_sig.n_args, call.n_args);
@@ -2641,7 +2616,7 @@ spcl_val spcl_uf_eval(spcl_uf* uf, spcl_inst* c, spcl_fn_call call) {
 	for (size_t i = 0; i < uf->call_sig.n_args; ++i) {
 	    spcl_set_valn(uf->fn_scope, uf->call_sig.args[i].val.s, uf->call_sig.args[i].n_els, call.args[i], 0);
 	}
-	spcl_val ret = spcl_read_lines(uf->fn_scope, uf->code_lines);
+	spcl_val ret = spcl_read_lines_block(uf->fn_scope, uf->code_lines);
 	//function calls make shallow copies, so we need to reset memory to avoid double frees
 	memset( uf->fn_scope->table, 0, sizeof(name_val_pair)*con_size(uf->fn_scope) );
 	return ret;

@@ -135,18 +135,6 @@ void spcl_fstream_append(spcl_fstream* fs, const char* str);
  */
 char* fs_get_line(const spcl_fstream* fs, psize b, psize e, size_t* len);
 /**
- * Find the line buffer starting on line start_line between the first instance of start_delim and the last instance of end_delim respecting nesting (i.e. if lines={"a {", "b {", "}", "} c"} then {"b {", "}"} is returned. Note that the result must be deallocated with a call to free().
- * start_line: the line to start reading from
- * end_line: if this spcl_val is not NULL, then the index of the line on which end_delim was found is stored here. If the end delimeter is not found, then the line is set to n_lines and the offset is set to zero
- * start_delim: the character to be used as the starting delimiter. This needs to be supplied so that we find a matching end_delim at the root level
- * end_delim: the character to be searched for
- * line_offset: the character on line start_line to start reading from, this defaults to zero. Note that this only applies to the start_line, and not any subsequent lines in the buffer.
- * include_delims: if true, then the delimeters are included in the enclosed strings. defualts to false
- * include_start: if true, then the part preceeding the first instance of start_delim will be included. This spcl_val is always false if include_delims is false. If include_delims is true, then this defaults to true.
- * returns: a spcl_fstream object which should be destroyed with a call to spcl_destroy_fstream().
- */
-spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, psize start, psize end);
-/**
  * Returns a version of the line buffer which is flattened so that everything fits onto one line.
  * sep_char: each newline in the buffer is replaced by a sep_char, unless sep_char=0 in which no characters are inserted
  * len: a pointer which if not null will hold the length of the string including the null terminator
@@ -484,7 +472,7 @@ spcl_val spcl_read_lines(struct spcl_inst* c, const spcl_fstream* b);
  */
 typedef struct spcl_uf {
     spcl_fn_call call_sig;
-    spcl_fstream* code_lines;
+    read_state code_lines;
     spcl_val (*exec)(spcl_inst*, spcl_fn_call);
     spcl_inst* fn_scope;
 } spcl_uf;
