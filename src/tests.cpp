@@ -855,57 +855,55 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	    //duplicate to silence const char* to char* errors
 	    line.s = strdup(lines[i]);
 	    line.n = strlen(lines[i]);
-	    s8 strval = fs_read( fs, make_lbi(0, st_off), make_lbi(0, st_off+line.n) );
+	    s8 strval = fs_read( fs, st_off, st_off+line.n );
 	    CHECK(s8cmp(line, strval) == 0);
 	    free(line.s);
 	    st_off += line.n+1;
 	}
-	lbi cur = make_lbi(0,0);
-	lbi lend = fs_line_end(fs, cur);
-	CHECK(lend.off == strlen(lines[0]));
+	psize cur = 0;
+	psize lend = fs_line_end(fs, cur);
+	CHECK(lend == strlen(lines[0]));
 	//find the block that says fn
-	read_state rs = make_read_state(fs, cur, make_lbi(0,fs->flen));
+	read_state rs = make_read_state(fs, cur, fs->flen);
 	spcl_key tkey = get_keyword(&rs);
 	CHECK(tkey == KEY_FN);
-	CHECK(rs.start.line == 0);
-	CHECK(rs.start.off == 3);
+	CHECK(rs.start == 3);
 	//find the parenthesis
-	lbi op_loc, open_ind, close_ind, new_end;
+	psize op_loc, open_ind, close_ind, new_end;
 	spcl_val er = find_operator(rs, &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
-	CHECK(open_ind.line == 0);CHECK(open_ind.off == strlen("fn test_fun"));
-	CHECK(close_ind.line == 0);CHECK(close_ind.off == strlen("fn test_fun")+2);
-	CHECK(lbicmp(op_loc, new_end) >= 0);
+	CHECK(open_ind == strlen("fn test_fun"));
+	CHECK(close_ind == strlen("fn test_fun")+2);
+	CHECK(op_loc >= new_end);
 	//test the braces around the function
 	cur = lend;
-	cur.off += 1;
+	cur += 1;
 	lend = fs_line_end(fs, cur);
 	er = find_operator(make_read_state(fs, cur, fs_end(fs)), &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
-	CHECK(open_ind.line == 0);CHECK(open_ind.off == cur.off);
-	CHECK(close_ind.line == 0);CHECK(close_ind.off == fs->flen - 2);
+	CHECK(open_ind == cur);
+	CHECK(close_ind == fs->flen - 2);
 	/*spcl_fstream* b_fun_con = fs_get_enclosed(fs, open_ind, close_ind);
 	for (size_t i = 0; i < b_fun_con->n_lines; ++i) {
 	    s8 line;
 	    line.s = strdup(fun_contents[i]);
 	    line.n = strlen(fun_contents[i]);
-	    s8 strval = fs_read(b_fun_con, make_lbi(i,0), make_lbi(i, line.n));
+	    s8 strval = fs_read(b_fun_con, 0, line.n);
 	    CHECK(s8cmp(line, strval) == 0);
 	    free(line.s);
 	}*/
 	//check the braces around the if statement
-	cur = lend;
-	cur.off += 1;
+	cur = lend+1;
 	er = find_operator(make_read_state(fs, cur, close_ind), &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
-	CHECK(open_ind.line == 0);CHECK(open_ind.off == strlen(lines[0])+strlen(lines[1])+2+strlen("if a > 5 "));
-	CHECK(close_ind.line == 0);CHECK(close_ind.off == 37);
+	CHECK(open_ind == strlen(lines[0])+strlen(lines[1])+2+strlen("if a > 5 "));
+	CHECK(close_ind == 37);
 	/*spcl_fstream* b_if_con = fs_get_enclosed(fs, open_ind, close_ind);
 	for (size_t i = 0; i < b_if_con->n_lines; ++i) {
 	    s8 line;
 	    line.s = strdup(if_contents[i]);
 	    line.n = strlen(if_contents[i]);
-	    s8 strval = fs_read(b_if_con, make_lbi(i,0), make_lbi(i, line.n));
+	    s8 strval = fs_read(b_if_con, 0, line.n);
 	    CHECK(s8cmp(line, strval) == 0);
 	    free(line.s);
 	}
@@ -924,36 +922,34 @@ TEST_CASE("spcl_fstream fs_get_enclosed") {
 	    s8 line;
 	    line.s = strdup(lines[i]);
 	    line.n = strlen(lines[i]);
-	    s8 strval = fs_read(fs, make_lbi(0, st_off), make_lbi(0, st_off+line.n));
+	    s8 strval = fs_read(fs, st_off, st_off+line.n);
 	    CHECK(s8cmp(line, strval) == 0);
 	    free(line.s);
 	    st_off += line.n+1;
 	}
-	lbi cur = make_lbi(0,0);
-	lbi lend = fs_line_end(fs, cur);
-	CHECK(lend.off == strlen(lines[0]));
+	psize cur = 0;
+	psize lend = fs_line_end(fs, cur);
+	CHECK(lend == strlen(lines[0]));
 	//find the block that says fn
 	read_state rs = make_read_state(fs, cur, lend);
 	spcl_key tkey = get_keyword(&rs);
 	CHECK(tkey == KEY_FN);
-	CHECK(rs.start.line == 0);
-	CHECK(rs.start.off == 5);
+	CHECK(rs.start == 5);
 	//find the parenthesis
-	lbi op_loc, open_ind, close_ind, new_end;
+	psize op_loc, open_ind, close_ind, new_end;
 	spcl_val er = find_operator(rs, &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
-	CHECK(open_ind.line == 0);CHECK(open_ind.off == strlen(" fn  test_fun"));
-	CHECK(close_ind.line == 0);CHECK(close_ind.off == 15);
-	CHECK(lbicmp(op_loc, new_end) >= 0);
+	CHECK(open_ind == strlen(" fn  test_fun"));
+	CHECK(close_ind == 15);
+	CHECK(op_loc >= new_end);
 	//check the braces around the if statement
-	cur = lend;
-	cur.off += 1;
+	cur = lend+1;
 	er = find_operator(make_read_state(fs, cur, fs_end(fs)), &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
-	CHECK(open_ind.line == 0);CHECK(open_ind.off == 28);
-	CHECK(close_ind.line == 0);CHECK(close_ind.off == 37);
+	CHECK(open_ind == 28);
+	CHECK(close_ind == 37);
 	//move to the next character after the open brace and get the contents
-	open_ind.off += 1;
+	open_ind += 1;
 	/*spcl_fstream* b_if_con = fs_get_enclosed(fs, open_ind, close_ind);
 	CHECK(b_if_con->n_lines == 1);
 	CHECK(strcmp(b_if_con->lines[0], "return 1\n") == 0);

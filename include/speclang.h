@@ -93,16 +93,6 @@ int write_numeric(char* str, size_t n, double x);
 
 /** ============================ spcl_fstream ============================ **/
 
-/**
- * store the position within a spcl_fstream, both line and offset in the line
- */
-typedef struct lbi {
-    size_t line;
-    size_t off;
-} lbi;
-lbi make_lbi(size_t pl, size_t po);
-int lbicmp(lbi lhs, lbi rhs);
-
 typedef struct spcl_fstream {
     FILE* f;		//the file pointer to read from
     psize flen;		//the length of the file
@@ -124,11 +114,11 @@ void destroy_spcl_fstream(spcl_fstream* fs);
 /**
  * Find the index of the end of the file.
  */
-lbi fs_end(const spcl_fstream* fs);
+psize fs_end(const spcl_fstream* fs);
 /**
  * Find the first line end after the index s.
  */
-lbi fs_line_end(const spcl_fstream* fs, lbi s);
+psize fs_line_end(const spcl_fstream* fs, psize s);
 /**
  * Append the line str to the end of the fstream fs
  * fs: the fstream to modify
@@ -143,7 +133,7 @@ void spcl_fstream_append(spcl_fstream* fs, const char* str);
  * e: read up to this character unless e <= b in which case reading goes to the end of the line
  * returns: a string with the contents between b and e. This string should be freed with a call to free().
  */
-char* fs_get_line(const spcl_fstream* fs, lbi b, lbi e, size_t* len);
+char* fs_get_line(const spcl_fstream* fs, psize b, psize e, size_t* len);
 /**
  * Find the line buffer starting on line start_line between the first instance of start_delim and the last instance of end_delim respecting nesting (i.e. if lines={"a {", "b {", "}", "} c"} then {"b {", "}"} is returned. Note that the result must be deallocated with a call to free().
  * start_line: the line to start reading from
@@ -155,7 +145,7 @@ char* fs_get_line(const spcl_fstream* fs, lbi b, lbi e, size_t* len);
  * include_start: if true, then the part preceeding the first instance of start_delim will be included. This spcl_val is always false if include_delims is false. If include_delims is true, then this defaults to true.
  * returns: a spcl_fstream object which should be destroyed with a call to spcl_destroy_fstream().
  */
-spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, lbi start, lbi end);
+spcl_fstream* fs_get_enclosed(const spcl_fstream* fs, psize start, psize end);
 /**
  * Returns a version of the line buffer which is flattened so that everything fits onto one line.
  * sep_char: each newline in the buffer is replaced by a sep_char, unless sep_char=0 in which no characters are inserted
@@ -329,7 +319,7 @@ typedef struct name_val_pair {
 struct name_val_pair make_name_val_pair(const char* p_name, spcl_val p_val);
 void cleanup_name_val_pair(name_val_pair nv);
 
-//TODO: refactor spcl_fn_call to accept lbi's instead of names
+//TODO: refactor spcl_fn_call to accept psize's instead of names
 typedef struct spcl_fn_call {
     s8 name;
     spcl_val args[SPCL_ARGS_BSIZE];
@@ -355,8 +345,8 @@ typedef struct spcl_inst spcl_inst;
  */
 typedef struct read_state {
     const spcl_fstream* b;
-    lbi start;
-    lbi end;
+    psize start;
+    psize end;
 } read_state;
 /**
  * Constructor for a new spcl_inst initialized with the contents of fname and optional command line arguments
@@ -384,11 +374,11 @@ void destroy_spcl_inst(spcl_inst* c);
  */
 #if SPCL_DEBUG_LVL>0
 typedef enum { KEY_NONE, KEY_IMPORT, KEY_CLASS, KEY_IF, KEY_FOR, KEY_ELSE, KEY_WHILE, KEY_BREAK, KEY_CONT, KEY_RET, KEY_FN, SPCL_N_KEYS } spcl_key;
-s8 fs_read(const spcl_fstream* fs, lbi s, lbi e);
-spcl_val do_op(struct spcl_inst* c, read_state rs, lbi op_loc, lbi* new_end, spcl_key key);
-read_state make_read_state(const spcl_fstream* fs, lbi s, lbi e);
+s8 fs_read(const spcl_fstream* fs, psize s, psize e);
+spcl_val do_op(struct spcl_inst* c, read_state rs, psize op_loc, psize* new_end, spcl_key key);
+read_state make_read_state(const spcl_fstream* fs, psize s, psize e);
 spcl_key get_keyword(read_state* rs);
-spcl_val find_operator(read_state rs, lbi* op_loc, lbi* open_ind, lbi* close_ind, lbi* new_end);
+spcl_val find_operator(read_state rs, psize* op_loc, psize* open_ind, psize* close_ind, psize* new_end);
 #endif
 /**
  * Search the spcl_inst for the variable with the matching name.
