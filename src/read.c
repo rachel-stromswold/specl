@@ -19,26 +19,6 @@ psize fs_end(const spcl_fstream* fs) {
     return fs->flen;
 }
 /**
- * move the line buffer forward by one character
- * p: the index to start at
- */
-static inline psize fs_add(const spcl_fstream* fs, psize p, size_t rhs) {
-    if (p+rhs <= fs->clen)
-	p += rhs;
-    return p;
-}
-/**
- * move the line buffer back by one character
- * p: the index to start at
- */
-static inline psize fs_sub(const spcl_fstream* fs, psize p, size_t rhs) {
-    if (p > rhs)
-	p -= rhs;
-    else
-	p = 0;
-    return p;
-}
-/**
  * returns the character at position pos
  */
 static inline char fs_get(const spcl_fstream* fs, psize pos) {
@@ -46,12 +26,6 @@ static inline char fs_get(const spcl_fstream* fs, psize pos) {
     if (pos >= fs->clen)
         return 0;
     return fs->cache[pos];
-}
-/**
- * return how many characters into the line buffer l is
- */
-static inline size_t fs_diff(const spcl_fstream* fs, psize r, psize l) {
-    return r - l;
 }
 
 /** ======================================================== utility functions ======================================================== **/
@@ -1990,7 +1964,7 @@ static inline spcl_val parse_literal_str(spcl_inst* c, read_state rs, psize open
     spcl_val v;
     v.type = VAL_STR;
     //set up a buffer with enough memory
-    v.val.s = xmalloc( fs_diff(rs.b, close_ind, open_ind)+1 );
+    v.val.s = xmalloc(close_ind - open_ind + 1);
     v.n_els = 0;
     for (psize it = open_ind+1; it < close_ind; ++it) {
 	char c = fs_get(rs.b, it);
