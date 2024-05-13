@@ -304,15 +304,21 @@ spcl_local s8 fs_read(const spcl_fstream* fs, psize s, psize e) {
 
 /**
  * Helper function which jumps to the first non-whitespace character after rs.
- * rs: the current read state to skip
+ * fs: the filestream to use
+ * s: the index to start from
+ * e: ensure that s does not read past this value. Set this value to be negative to indicate reading to the end of the file
  * force: if non-zero, then the returned value is guaranteed to move rs.start by at least one character. For instance, if you know that the rs.start is on an open parentheses and you want to act on the enclosed string, set this to one
- * returns: the updated read state
+ * returns: the index of the first non-whitespace character after s before e
  */
-static inline void skip_ws(read_state* rs, int force) {
+static inline psize skip_ws(const spcl_fstream* fs, psize s, psize e, int force) {
     if (force)
-	++rs->start;
-    while (is_whitespace(fs_get(rs->b, rs->start)) && rs->start < rs->end)
-	++rs->start;
+	++s;
+    //ensure that we don't read past the end of the file
+    if (e < s || e > fs->flen)
+	e = fs->flen;
+    while (is_whitespace(fs_get(fs, s)) && s < e)
+	++s;
+    return s;
 }
 
 /** ======================================================== spcl_fn_call ======================================================== **/
@@ -1571,7 +1577,7 @@ static inline int get_oplen(unsigned char op, unsigned char next) {
  * returns: the spck_key code for the matched key.
  */
 spcl_local spcl_key get_keyword(read_state* rs) {
-    skip_ws(rs, 0);
+    rs->start = skip_ws(rs->b, rs->start, rs->end, 0);
     //identify keywords. All keywords, except "fn", must come at the start of a parsed value or they are invalid. There is an exception for "fn" since foo = fn(bar) {...} is a valid expression. However, even in this case, "fn" will start the expression after handling the next operator.
     s8 expr = fs_read(rs->b, rs->start, rs->end);
     psize chn = expr.n;
@@ -1582,7 +1588,7 @@ spcl_local spcl_key get_keyword(read_state* rs) {
 	    expr.n = spcl_keywords[i].n;
 	    if (s8cmp(expr, spcl_keywords[i]) == 0) {
 		rs->start += spcl_keywords[i].n;
-		skip_ws(rs, 0);
+		rs->start = skip_ws(rs->b, rs->start, rs->end, 0);
 		return i;
 	    }
 	}
@@ -1786,8 +1792,8 @@ spcl_local spcl_val do_op(spcl_inst* c, read_state rs, psize op_loc, psize* new_
     rs_l.end = op_loc;
     rs_r.start = op_loc+op_width;
     //fast-forward
-    skip_ws(&rs_l, 0);
-    skip_ws(&rs_r, 0);
+    rs_l.start = skip_ws(rs_l.b, rs_l.start, rs_l.end, 0);
+    rs_r.start = skip_ws(rs_r.b, rs_r.start, rs_r.end, 0);
     //handle special cases
     if (op == '?') {
 	//ternary operators and dereferences are special cases
@@ -1909,8 +1915,7 @@ static inline for_state* make_for_state(spcl_inst* c, read_state rs, psize for_s
 	return fs;
     }
     //the variable name is whatever is in between the "for" and the "in"
-    while (is_whitespace(fs_get(rs.b, after_for)))
-	++after_for;
+    after_for = skip_ws(rs.b, after_for, rs.end, 0);
     s8 var_name = s8dup( trim_whitespace(fs_read(rs.b, after_for, fs->in_start)) );
     //now parse the list we iterate over
     psize after_in = fs->in_start+strlen("in");
@@ -2017,7 +2022,7 @@ static inline spcl_val parse_literal_list(struct spcl_inst* c, read_state rs, ps
 	    }
 	    //move the start to the first character after the open paren or previous comma and the end to the next comma or close paren. 
 	    rs.end = strchr_block_rs(rs.b, rs.start, close_ind, ',');
-	    skip_ws(&rs, 0);
+	    rs.start = skip_ws(rs.b, rs.start, rs.end, 0);
 	    //read using the current rs
 	    lbuf[sto.n_els] = spcl_parse_line_rs(c, rs, NULL, KEY_NONE);
 	    if (lbuf[sto.n_els].type == VAL_ERR) {
@@ -2075,7 +2080,7 @@ static inline spcl_val parse_literal_fn(struct spcl_inst* c, spcl_key key, read_
     if (key != KEY_FN && rs.start == open_ind) {
 	rs.start = open_ind;
 	rs.end = close_ind;
-	skip_ws(&rs, 1);
+	rs.start = skip_ws(rs.b, rs.start, rs.end, 1);
 	return spcl_parse_line_rs(c, rs, NULL, key);
     }
     spcl_val sto = spcl_make_none();
@@ -2120,8 +2125,7 @@ static inline spcl_val parse_literal_fn(struct spcl_inst* c, spcl_key key, read_
 	//read the arguments
 	for (size_t i = 0; i < f.n_args && i+1 < SPCL_ARGS_BSIZE; ++i) {
 	    psize s = arg_inds[i]+1;
-	    while (is_whitespace(fs_get(rs.b, s)) && s < arg_inds[i+1])
-		++s;
+	    s = skip_ws(rs.b, s, arg_inds[i+1], 0);
 	    //if we reached the end then that either indicates no arguments or invalid syntax
 	    if (s == arg_inds[i+1]) {
 		//that means that this is a () expression
@@ -2167,7 +2171,7 @@ static inline spcl_val parse_literal_table(struct spcl_inst* c, read_state rs, p
  * new_end: if non-null, save the last character read when parsing this line
  */
 static inline spcl_val spcl_parse_line_rs(struct spcl_inst* c, read_state rs, psize* new_end, spcl_key start_key) {
-    skip_ws(&rs, 0);
+    rs.start = skip_ws(rs.b, rs.start, rs.end, 0);
     if (new_end)
 	*new_end = rs.end;
     spcl_val sto = spcl_make_none();
@@ -2188,8 +2192,7 @@ static inline spcl_val spcl_parse_line_rs(struct spcl_inst* c, read_state rs, ps
 	//if there isn't a valid parenthetical expression, then we should interpret this as a variable
 	if (open_ind == rs.end || close_ind == rs.end) {
 	    //ensure that empty strings return undefined
-	    while (is_whitespace(fs_get(rs.b, rs.start)) && rs.start < rs.end)
-		++rs.start;
+	    rs.start = skip_ws(rs.b, rs.start, rs.end, 0);
 	    char cur = fs_get(rs.b, rs.start);
 	    if (cur == 0 || rs.start == rs.end)
 		return spcl_make_none(); 
@@ -2422,8 +2425,7 @@ static inline spcl_val spcl_read_lines_block(struct spcl_inst* c, read_state blo
 	    //TODO: return break and continue statements should immediately exit
 	    //return sto;
 	} else if (start_key == KEY_IMPORT) {
-	    while (is_whitespace(fs_get(rs.b, rs.start)))
-		++rs.start;
+	    rs.start = skip_ws(rs.b, rs.start, rs.end, 0);
 	    //TODO: allow enclosed quotes for files with whitespace
 	    s8 name = fs_read(rs.b, rs.start, rs.end);
 	    name.n = (psize)(strchr(name.s, '\n') - name.s);
@@ -2549,8 +2551,7 @@ static inline spcl_val spcl_make_fn_rs(struct spcl_inst* c, read_state rs, psize
 	return spcl_make_err(E_BAD_SYNTAX, "declared function without room to grow");
     //fast forward to the open curly brace
     psize args_end = arg_inds[n_args]+1;
-    while (is_whitespace(fs_get(rs.b, args_end)))
-	++args_end;
+    args_end = skip_ws(rs.b, args_end, rs.end, 0);
     if (fs_get(rs.b, args_end) != BEG_CRL)
 	return spcl_make_err(E_BAD_SYNTAX, "unexpected %c", fs_get(rs.b, args_end));
     psize op_loc, open_ind, close_ind;
