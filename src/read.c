@@ -255,13 +255,18 @@ spcl_fstream* make_spcl_fstreamn(const char* p_fname, size_t n) {
 	//TODO: reading the entire file into memory is dumb, we should stream from it instead
 	psize j = 0;
 	int res = fgetc(fp);
-	while (res != EOF) {
+	while (1) {
 	    //if we reached the end of the buffer, try growing and return NULL if that fails
 	    if (j == fs->clen) {
 		if (!grow_fstream(fs)) {
 		    destroy_spcl_fstream(fs);
 		    return NULL;
 		}
+	    }
+	    //NULL terminate and exit at the end of the file
+	    if (res == EOF) {
+		fs->cache[j] = 0;
+		return fs;
 	    }
 	    //otherwise, append
 	    fs->cache[j++] = (char)res;
