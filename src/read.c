@@ -283,7 +283,7 @@ void destroy_spcl_fstream(spcl_fstream* fs) {
 psize fs_find_line(const spcl_fstream* fs, psize s) {
     psize ret = 0;
     for (psize i = 0; i < s; ++i) {
-	if (fs->cache[i] == '\n')
+	if (fs_get(fs, i) == '\n')
 	    ++ret;
     }
     return ret;
@@ -2121,7 +2121,7 @@ static inline spcl_val parse_literal_fn(struct spcl_inst* c, spcl_key key, read_
 	for (size_t i = 0; i < f.n_args && i+1 < SPCL_ARGS_BSIZE; ++i) {
 	    psize s = arg_inds[i]+1;
 	    while (is_whitespace(fs_get(rs.b, s)) && s < arg_inds[i+1])
-		s = s+1;
+		++s;
 	    //if we reached the end then that either indicates no arguments or invalid syntax
 	    if (s == arg_inds[i+1]) {
 		//that means that this is a () expression
