@@ -280,18 +280,14 @@ void destroy_spcl_fstream(spcl_fstream* fs) {
 	fclose(fs->f);
     free(fs);
 }
-/**
- * Find the line that the location s resides on.
- */
-psize fs_find_line(spcl_fstream* fs, psize s) {
+psize fs_find_line(const spcl_fstream* fs, psize s) {
     psize ret = 0;
     for (psize i = 0; i < s; ++i) {
-	if (fs->cache[i] = '\n')
+	if (fs->cache[i] == '\n')
 	    ++ret;
     }
     return ret;
 }
-//get the index of the last character in the filestream fs that has the line s
 psize fs_line_end(const spcl_fstream* fs, psize s) {
     while (s < fs->flen && fs_get(fs, s) != '\n')
 	++s;

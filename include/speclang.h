@@ -112,6 +112,10 @@ spcl_fstream* make_spcl_fstreamn(const char* p_fname, size_t n);
  */
 void destroy_spcl_fstream(spcl_fstream* fs);
 /**
+ * Find the line that the location s resides on.
+ */
+psize fs_find_line(const spcl_fstream* fs, psize s);
+/**
  * Find the index of the end of the file.
  */
 psize fs_end(const spcl_fstream* fs);

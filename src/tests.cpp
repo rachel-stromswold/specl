@@ -867,6 +867,7 @@ TEST_CASE("spcl_fstream navigation") {
 	read_state rs = make_read_state(fs, cur, fs->flen);
 	spcl_key tkey = get_keyword(&rs);
 	CHECK(tkey == KEY_FN);
+	CHECK(fs_find_line(fs, rs.start) == 0);
 	CHECK(rs.start == 3);
 	//find the parenthesis
 	psize op_loc, open_ind, close_ind, new_end;
@@ -876,17 +877,18 @@ TEST_CASE("spcl_fstream navigation") {
 	CHECK(close_ind == strlen("fn test_fun")+2);
 	CHECK(op_loc >= new_end);
 	//test the braces around the function
-	cur = lend;
-	cur += 1;
+	cur = lend+1;
 	lend = fs_line_end(fs, cur);
 	er = find_operator(make_read_state(fs, cur, fs_end(fs)), &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
+	CHECK(fs_find_line(fs, cur) == 1);
 	CHECK(open_ind == cur);
 	CHECK(close_ind == fs->flen - 2);
 	//check the braces around the if statement
 	cur = lend+1;
 	er = find_operator(make_read_state(fs, cur, close_ind), &op_loc, &open_ind, &close_ind, &new_end);
 	CHECK(er.type != VAL_ERR);
+	CHECK(fs_find_line(fs, open_ind) == 2);
 	CHECK(open_ind == strlen(lines[0])+strlen(lines[1])+2+strlen("if a > 5 "));
 	CHECK(close_ind == 37);
 	destroy_spcl_fstream(fs);
