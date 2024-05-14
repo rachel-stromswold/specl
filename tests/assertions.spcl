@@ -1,3 +1,8 @@
+# test defaults read from argv
+k1 = (len(sys.argv) > 0 && sys.argv[0] == "f")? 0 : 1.2e-5	#defaults to 1.2e-5 G/nm
+box_len = (isdef(box_len))? box_len : 1				#defaults to 1
+hs_rad = (isdef(hs_rad))? hs_rad : 0.0157			#defaults to slightly more than 2^-6
+
 # list assignment
 foo = [1, 2, 3, 4]
 foo[0] = 2

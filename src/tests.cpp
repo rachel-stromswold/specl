@@ -408,6 +408,9 @@ TEST_CASE("operations") {
 	safecpy(buf, "(1 < 2) ? 100 : 200", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
 	test_num(tmp_val, 100);
+	safecpy(buf, "(1 < 2)? 0 : 1.2e-5", SPCL_STR_BSIZE);
+	tmp_val = spcl_parse_line(sc, buf);
+	test_num(tmp_val, 0);
 	//check with pairs of strings
 	safecpy(buf, "(1 < 2) ? \"100\" : \"200\"", SPCL_STR_BSIZE);
 	tmp_val = spcl_parse_line(sc, buf);
@@ -1291,6 +1294,19 @@ TEST_CASE("file importing") {
 TEST_CASE("assertions") {
     spcl_val v = spcl_inst_from_file(TEST_ASSERT_NAME, 0, NULL);
     CHECK(v.type != VAL_ERR);
+    CHECK(spcl_test(v.val.c, "k1 == 0.000012"));
+    CHECK(spcl_test(v.val.c, "box_len == 1"));
+    CHECK(spcl_test(v.val.c, "hs_rad == 0.0157"));
+    cleanup_spcl_val(&v);
+    const char* targv_free[] = {"-f", "--box_len=2", "--hs_rad=2"};
+    size_t targc_free = sizeof(targv_free)/sizeof(char*);
+    v = spcl_inst_from_file(TEST_ASSERT_NAME, targc_free, targv_free);
+    CHECK(v.type != VAL_ERR);
+    CHECK(spcl_test(v.val.c, "len(sys.argv) == 1"));
+    CHECK(spcl_test(v.val.c, "sys.argv[0] == \"f\""));
+    CHECK(spcl_test(v.val.c, "k1 == 0"));
+    CHECK(spcl_test(v.val.c, "box_len == 2"));
+    CHECK(spcl_test(v.val.c, "hs_rad == 2"));
     cleanup_spcl_val(&v);
 }
 
